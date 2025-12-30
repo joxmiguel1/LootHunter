@@ -12,6 +12,10 @@ All notable changes to this project will be documented in this file.
 - Reworked Window settings layout with subtitles and spacing controls.
 - Updated default/min window size to 500x456.
 - Stored item specs by ID with automatic migration for multi-language stability.
+- Forced spec names to respect addon language (EN/ES) when using spec IDs.
+- Added Bug Report help section with copy-friendly links + localized copy hint text.
+- Spec row dropdown now closes when clicking outside and stays anchored to the row.
+- Removed Status help scrollbar visuals while keeping mousewheel scrolling.
 
 ## 1.4-test
 - Added primary color theming via a single hex value and applied it across UI accents.
