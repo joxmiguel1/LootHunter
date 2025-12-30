@@ -18,6 +18,7 @@ local currentTypeFilter = "ALL"
 local topPanel = nil
 local pendingRefresh = false
 local specRowMenuFrame = nil
+local specRowMenuOverlay = nil
 local typeMenuFrame, sourceMenuFrame, specMenuFrame = nil, nil, nil
 local DEFAULT_WINDOW_WIDTH = 510
 local DEFAULT_WINDOW_HEIGHT = 456
@@ -71,6 +72,7 @@ local function CloseAllDropdowns()
     if sourceMenuFrame then sourceMenuFrame:Hide() end
     if specMenuFrame then specMenuFrame:Hide() end
     if specRowMenuFrame then specRowMenuFrame:Hide() end
+    if specRowMenuOverlay then specRowMenuOverlay:Hide() end
 end
 
 -- Desplegable de selección de spec por fila
@@ -98,6 +100,17 @@ local function ShowRowSpecMenu(anchor, entry)
                 self._ownerRow._specMenuOpen = nil
                 self._ownerRow = nil
             end
+            if specRowMenuOverlay then specRowMenuOverlay:Hide() end
+        end)
+    end
+    if not specRowMenuOverlay then
+        specRowMenuOverlay = CreateFrame("Button", nil, UIParent)
+        specRowMenuOverlay:SetFrameStrata("DIALOG")
+        specRowMenuOverlay:EnableMouse(true)
+        specRowMenuOverlay:SetAllPoints(UIParent)
+        specRowMenuOverlay:Hide()
+        specRowMenuOverlay:SetScript("OnClick", function()
+            if specRowMenuFrame then specRowMenuFrame:Hide() end
         end)
     end
     -- Limpiar botones previos
@@ -139,6 +152,7 @@ local function ShowRowSpecMenu(anchor, entry)
     specRowMenuFrame:SetWidth(110)
     specRowMenuFrame:ClearAllPoints()
     specRowMenuFrame:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
+    specRowMenuOverlay:Show()
     if entry.row then
         entry.row._specMenuOpen = true
         specRowMenuFrame._ownerRow = entry.row
@@ -1266,15 +1280,22 @@ function LootHunter_CreateGUI()
         introGuideTitle:SetFont(fontName, math.max(18, fontSize or 18), fontFlags)
     end
     local introGuideDesc = CreateHelpText(viewGuide, L["HELP_GUIDE_INTRO_DESC"], introGuideTitle, -5, false)
-    local hm1 = CreateHelpText(viewGuide, L["HELP_METHOD_1_TITLE"], introGuideDesc, -15, true)
-    local methodFont, methodSize, methodFlags = hm1:GetFont()
-    local subtitleFontSize = math.max(14, (methodSize or 16) - 2)
-    if methodFont then
-        hm1:SetFont(methodFont, subtitleFontSize, methodFlags)
-    end
+    local methodFont, methodSize, methodFlags
+    local subtitleFontSize = 14
     local function ApplySubtitleStyle(fs)
         if not fs or not methodFont then return end
         fs:SetFont(methodFont, subtitleFontSize, methodFlags)
+    end
+    local hm1 = CreateHelpText(viewGuide, L["HELP_METHOD_1_TITLE"], introGuideDesc, -15, true)
+    methodFont, methodSize, methodFlags = hm1:GetFont()
+    subtitleFontSize = math.max(14, (methodSize or 16) - 2)
+    if methodFont then
+        hm1:SetFont(methodFont, subtitleFontSize, methodFlags)
+    end
+    ApplySubtitleStyle(hm1)
+    do
+        local pr, pg, pb = GetPrimaryColor()
+        hm1:SetTextColor(pr + (1 - pr) * 0.5, pg + (1 - pg) * 0.5, pb + (1 - pb) * 0.5)
     end
     local tm1 = CreateHelpText(viewGuide, L["HELP_METHOD_1_DESC"], hm1, -5, false)
     local btnGuideJournal = CreateFrame("Button", nil, viewGuide, "BackdropTemplate")
@@ -1302,7 +1323,7 @@ function LootHunter_CreateGUI()
     local watchNote = CreateHelpText(viewGuide, L["HELP_GUIDE_WATCH"], btnGuideJournal, -15, false)
     do
         local pr, pg, pb = GetPrimaryColor()
-        watchNote:SetTextColor(pr + (1 - pr) * 0.5, pg + (1 - pg) * 0.5, pb + (1 - pb) * 0.5)
+        watchNote:SetTextColor(pr + (1 - pr) * 0.8, pg + (1 - pg) * 0.8, pb + (1 - pb) * 0.8)
     end
 
     -- 2. VISTA TIPS
@@ -1398,12 +1419,71 @@ function LootHunter_CreateGUI()
     RefreshStatusScrollHeight()
 
     -- 4. VISTA REPORTE DE BUGS
-    local bugsTitle = CreateHelpText(viewBugs, L["HELP_BUGS_TITLE"], nil, 0, true)
+    local BUG_REPORT_URL = "https://github.com/joxmiguel1/LootHunter/issues/new"
+    local DISCORD_URL = "https://discord.gg/E3QMp6Eg"
+    local bugsTitle = CreateHelpText(viewBugs, L["HELP_BUGS_TITLE"], nil, -4, true)
     ApplySubtitleStyle(bugsTitle)
-    -- Solo titulo para reporte de bugs
+    local bugsDesc = CreateHelpText(viewBugs, L["HELP_BUGS_DESC"], bugsTitle, -8, false)
+    bugsDesc:SetPoint("RIGHT", viewBugs, "RIGHT", -10, 0)
+
+    local function CreateCopyLinkBox(parent, text, anchor, yOffset)
+        local box = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+        box:SetAutoFocus(false)
+        box:SetSize(300, 20)
+        box:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 6, yOffset or -6)
+        box:SetText(text or "")
+        box:SetCursorPosition(0)
+        box:SetTextInsets(6, 6, 0, 0)
+        ApplyAccentFont(box)
+        box:SetScript("OnEditFocusGained", function(self)
+            self:HighlightText(0, -1)
+        end)
+        box:SetScript("OnMouseUp", function(self)
+            self:HighlightText(0, -1)
+        end)
+        local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        hint:SetPoint("TOPLEFT", box, "BOTTOMLEFT", 6, -2)
+        hint:SetText(L["HELP_BUGS_COPY_HINT"] or "CTRL + C")
+        hint:SetTextColor(0.65, 0.65, 0.65)
+        return box
+    end
+
+    local bugsLinkLabel = CreateHelpText(viewBugs, L["HELP_BUGS_LINK_LABEL"], bugsDesc, -12, false)
+    local bugsTitleFont, bugsTitleSize, bugsTitleFlags = bugsTitle:GetFont()
+    if bugsTitleFont and bugsTitleSize then
+        bugsLinkLabel:SetFont(bugsTitleFont, math.max(12, bugsTitleSize - 4), bugsTitleFlags)
+    end
+    do
+        local pr, pg, pb = GetPrimaryColor()
+        bugsLinkLabel:SetTextColor(pr + (1 - pr) * 0.5, pg + (1 - pg) * 0.5, pb + (1 - pb) * 0.5)
+    end
+    local bugsLinkBox = CreateCopyLinkBox(viewBugs, BUG_REPORT_URL, bugsLinkLabel, -6)
+
+    local discordDesc = CreateHelpText(viewBugs, L["HELP_BUGS_DISCORD_DESC"], bugsLinkBox, -22, false)
+    discordDesc:ClearAllPoints()
+    discordDesc:SetPoint("TOPLEFT", bugsLinkBox, "BOTTOMLEFT", -6, -14)
+    discordDesc:SetPoint("RIGHT", viewBugs, "RIGHT", -10, 0)
+    local discordLabel = CreateHelpText(viewBugs, L["HELP_BUGS_DISCORD_LABEL"], discordDesc, -12, false)
+    if bugsTitleFont and bugsTitleSize then
+        discordLabel:SetFont(bugsTitleFont, math.max(12, bugsTitleSize - 4), bugsTitleFlags)
+    end
+    do
+        local pr, pg, pb = GetPrimaryColor()
+        discordLabel:SetTextColor(pr + (1 - pr) * 0.5, pg + (1 - pg) * 0.5, pb + (1 - pb) * 0.5)
+    end
+    local discordBox = CreateCopyLinkBox(viewBugs, DISCORD_URL, discordLabel, -6)
+
+    viewBugs:HookScript("OnShow", function()
+        if bugsLinkBox then
+            bugsLinkBox:ClearFocus()
+        end
+    end)
+    viewBugs:HookScript("OnHide", function()
+        if bugsLinkBox then bugsLinkBox:ClearFocus() end
+    end)
 
     -- 5. VISTA CREDITOS
-    local creditsTitle = CreateHelpText(viewCredits, L["HELP_CREDITS_TITLE"], nil, 0, true)
+    local creditsTitle = CreateHelpText(viewCredits, L["HELP_CREDITS_TITLE"], nil, -4, true)
     ApplySubtitleStyle(creditsTitle)
     -- Solo titulo para creditos
 

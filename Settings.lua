@@ -371,7 +371,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         -- Texto del label
         local label = entryFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
         label:SetPoint("LEFT", cb, "RIGHT", 8, 0)
-        label:SetPoint("RIGHT", entryFrame, "RIGHT", -30, 0) -- espacio para preview si existe
+        label:SetWidth(320) -- Ancho fijo para evitar salto de linea
         label:SetJustifyH("LEFT")
         label:SetWordWrap(true)
         label:SetMaxLines(3)
@@ -399,10 +399,6 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
                 GameTooltip:Show()
             end)
             previewBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            -- Ajusta el margen derecho del label para dejar espacio fijo al preview
-            label:ClearAllPoints()
-            label:SetPoint("LEFT", cb, "RIGHT", 8, 0)
-            label:SetPoint("RIGHT", entryFrame, "RIGHT", -28, 0)
         end
 
         -- Texto de descripcion
