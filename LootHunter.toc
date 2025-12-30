@@ -1,0 +1,21 @@
+## Interface: 50400
+## Title: |cff00a86bLoot Hunter|r
+## Notes: Rastrea tu loot deseado y alerta cuando aparece en el botin.
+## Author: Xamael
+## Version: 1.5-test
+## SavedVariables: LootHunterDB
+
+
+## Core libraries
+Libs\LibStub.lua
+Libs\CallbackHandler-1.0.lua
+
+## Broker libraries
+Libs\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0.lua
+
+Localization.lua
+Settings.lua
+Minimap.lua
+UI.lua
+LootHunter.lua
