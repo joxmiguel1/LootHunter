@@ -23,9 +23,9 @@ This addon eliminates human error from your raids:
 * **🏆 Complete Outcome Tracking:** Experience dedicated alerts for every outcome: a huge celebration when you **Win**, a lament when someone else gets your item, and a smart **Coin Reminder** with pre-warning logic so you never forget a bonus roll.
 * **⚙️ Deep Customization & Control:** Configure every alert to your liking, adjust the UI scale for your screen, and manage your per-character lists with quick tools to clear or reset your data.
 * **🛡️ Set it and Forget it:** You don't need to keep the window open. Build your list, close the UI, and play in peace; the addon works in the background and only pops up when needed.
-* **Spec Flexibility:** Want the item for your off-spec? Simply **click on the spec name** in your list to manually toggle it instantly.
-* **Priority Management:** Mark items as "High Priority" (double click) or "Obtained" (right click) to keep your list clean.
-* **Quick Access:** Minimap button to check your list in seconds.
+* **✨ Spec Flexibility:** Want the item for your off-spec? Simply **click on the spec name** in your list to manually toggle it instantly.
+* **🎯 Priority Management:** Mark items as "High Priority" (double click) or "Obtained" (right click) to keep your list clean.
+* **⚡ Quick Access:** Minimap button to check your list in seconds.
 
 ---
 
