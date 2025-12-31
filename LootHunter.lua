@@ -1104,6 +1104,9 @@ local function ShowDropAlert(itemID, itemData)
         end
         PlaySound(12867)
     end)
+    if L["DROP_CHAT_MSG"] then
+        print(string.format(L["DROP_CHAT_MSG"], itemData.link or itemData.name or tostring(itemID)))
+    end
     LogAlertDebug("DROP alert shown for item " .. tostring(itemID))
 end
 -- Buffs de moneda MoP: Seal of Power (LFR), Seal of Fate (Normal)

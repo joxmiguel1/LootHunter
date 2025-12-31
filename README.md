@@ -18,8 +18,11 @@ This addon eliminates human error from your raids:
 * ✨ **Independent Lists:** Manage separate lists per character and specialization without mixing anything up.
 
 ## ⚡ Key Features
+* **🛍️ Smart Wishlist & Spec Detection:** Build your list by simply **Shift+Clicking** items in the Encounter Journal. The addon automatically tracks items by boss and specialization, with automatic spec detection and multi-language support.
+* **📢 Unmissable Drop Alerts:** Get massive, screen-flashing visual alerts and clear chat notices the moment your tracked items appear in the loot window or are linked in raid chat, so you never miss a drop.
+* **🏆 Complete Outcome Tracking:** Experience dedicated alerts for every outcome: a huge celebration when you **Win**, a lament when someone else gets your item, and a smart **Coin Reminder** with pre-warning logic so you never forget a bonus roll.
+* **⚙️ Deep Customization & Control:** Configure every alert to your liking, adjust the UI scale for your screen, and manage your per-character lists with quick tools to clear or reset your data.
 * **🛡️ Set it and Forget it:** You don't need to keep the window open. Build your list, close the UI, and play in peace; the addon works in the background and only pops up when needed.
-* **Native Integration:** Add items directly from the Dungeon Journal (**Shift+Click**). Automatically detects your current specialization.
 * **Spec Flexibility:** Want the item for your off-spec? Simply **click on the spec name** in your list to manually toggle it instantly.
 * **Priority Management:** Mark items as "High Priority" (double click) or "Obtained" (right click) to keep your list clean.
 * **Quick Access:** Minimap button to check your list in seconds.
