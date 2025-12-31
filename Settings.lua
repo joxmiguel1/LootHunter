@@ -695,6 +695,12 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     Settings:CreateCheckbox(alertsPanel, "lootAlerts.itemWon", L["SETTING_ALERTS_WON_LABEL"], L["SETTING_ALERTS_WON_DESC"], nil, PreviewItemWon)
     Settings:CreateCheckbox(alertsPanel, "lootAlerts.itemSeen", L["SETTING_ALERTS_SEEN_LABEL"], L["SETTING_ALERTS_SEEN_DESC"], nil, PreviewItemSeen)
     Settings:CreateCheckbox(alertsPanel, "lootAlerts.otherWonSound", L["SETTING_ALERTS_OTHER_SOUND_LABEL"], L["SETTING_ALERTS_OTHER_SOUND_DESC"], nil, PreviewOtherWonSound)
+    if alertsPanel._layout and alertsPanel._layout[#alertsPanel._layout] then
+        alertsPanel._layout[#alertsPanel._layout].afterSpacing = (alertsPanel._layout[#alertsPanel._layout].afterSpacing or 0) + 10
+        ReflowPanel(alertsPanel)
+    end
+    CreateSectionHeader(alertsPanel, L["SETTING_ALERTS_MISC_TITLE"], -10)
+    Settings:CreateCheckbox(alertsPanel, "lootAlerts.bossNoItems", L["SETTING_ALERTS_BOSS_NONE_LABEL"], L["SETTING_ALERTS_BOSS_NONE_DESC"])
 
     local windowPanel = Settings:CreateCategory("Window", L["WINDOW_SETTINGS"])
     windowPanel._entryAfterSpacing = -2

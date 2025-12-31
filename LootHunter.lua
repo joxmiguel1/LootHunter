@@ -281,6 +281,11 @@ local function EnqueueAlert(duration, priority, fn)
     end
     if fn then fn() end
 end
+local function LogAlertDebug(msg)
+    if addonTable and addonTable.LogDebug then
+        addonTable.LogDebug("|cff00ff00[Alert]|r " .. msg)
+    end
+end
 -- TABLA DE CATEGORÍAS
 local SLOT_INFO = {}
 local function RebuildSlotInfo()
@@ -333,6 +338,7 @@ local function InitializeSettings()
             itemWon = true,
             itemSeen = true,
             otherWonSound = true,
+            bossNoItems = false,
         },
         general = {
             windowsLocked = true,
@@ -843,7 +849,9 @@ local function HandleSpecChange(event, unit)
     LootHunter_RefreshUI()
 end
 local function HandleLootEvent(event)
-    LogCoinDebug(string.format("Event %s received. Checking pending coin timers.", event))
+    if PendingCoinReminders and next(PendingCoinReminders) then
+        LogCoinDebug(string.format("Event %s received. Checking pending coin timers.", event))
+    end
     -- Al abrir el botín, si vemos items de la lista, disparar alerta DROP inmediata
     if CurrentCharDB and GetNumLootItems then
         local num = GetNumLootItems()
@@ -852,10 +860,6 @@ local function HandleLootEvent(event)
             local itemID = link and tonumber(link:match("item:(%d+):"))
             if itemID and CurrentCharDB[itemID] and CurrentCharDB[itemID].status == 0 then
                 ShowDropAlert(itemID, CurrentCharDB[itemID])
-                local key = FindReminderKeyForItem(itemID)
-                if key then
-                    StartCoinReminderTimer(key, "loot_view")
-                end
                 LootHunter_RefreshUI()
             end
         end
@@ -895,6 +899,10 @@ end
 local function ProcessCoinReminder(key)
     local entry = PendingCoinReminders[key]
     if not entry or not CurrentCharDB then return end
+    if entry.dropSeen then
+        LogCoinDebug(string.format("Coin reminder for %s skipped because drop was seen.", entry.boss or "Unknown"))
+        return
+    end
     PendingCoinReminders[key] = nil
     local stillMissing = {}
     for _, id in ipairs(entry.items) do
@@ -917,6 +925,7 @@ local function ProcessCoinReminder(key)
                 addonTable.FlashScreen("YELLOW")
             end
         end)
+        LogAlertDebug("Coin reminder alert shown for " .. (entry.boss or "Unknown"))
     end
     -- Alertas visuales y sonoras
     if LootHunterDB.settings.coinReminder.soundEnabled then
@@ -934,6 +943,10 @@ end
 local function StartCoinReminderTimer(key, reason, delay)
     local entry = PendingCoinReminders[key]
     if not entry or entry.timerStarted then return end
+    if entry.dropSeen or entry.blockCoin then
+        LogCoinDebug(string.format("Coin timer blocked for %s (reason: %s).", entry.boss or "Unknown", reason or "unknown"))
+        return
+    end
     if entry.deferStartUntil and GetTime() < entry.deferStartUntil then
         LogCoinDebug("Coin timer deferred until boss pre-warning completes.")
         return
@@ -949,6 +962,14 @@ end
 local function StartTwoStageCoinReminder(key)
     local entry = PendingCoinReminders[key]
     if not entry or entry.timerStarted then return end
+    if entry.dropSeen then
+        LogCoinDebug(string.format("Two-stage reminder for %s blocked because drop was seen.", entry.boss or "Unknown"))
+        return
+    end
+    if entry.deathTime and (GetTime() - entry.deathTime) < 30 then
+        LogCoinDebug(string.format("Two-stage reminder for %s delayed until 30s after boss death.", entry.boss or "Unknown"))
+        return
+    end
     if entry.deferStartUntil and GetTime() < entry.deferStartUntil then
         LogCoinDebug("Two-stage coin reminder deferred until boss pre-warning completes.")
         return
@@ -994,7 +1015,14 @@ end
 local function ActivatePendingForBonusRoll(reason)
     for key, entry in pairs(PendingCoinReminders) do
         if entry and not entry.timerStarted then
-            StartTwoStageCoinReminder(key)
+            if entry.dropSeen then
+                LogCoinDebug(string.format("Bonus roll activation ignored for %s because drop was seen.", entry.boss or "Unknown"))
+            elseif entry.deathTime and (GetTime() - entry.deathTime) >= 30 then
+                LogCoinDebug(string.format("Bonus roll activation triggering reminder for %s.", entry.boss or "Unknown"))
+                StartCoinReminderTimer(key, "bonus_roll_activate", 0)
+            else
+                LogCoinDebug(string.format("Bonus roll activation deferred for %s (waiting 30s no-drop window).", entry.boss or "Unknown"))
+            end
         end
     end
 end
@@ -1012,6 +1040,32 @@ local function FindReminderKeyForItem(itemID)
     end
     return nil
 end
+local function RemoveItemFromReminder(itemID)
+    local key = FindReminderKeyForItem(itemID)
+    if not key then return end
+    local entry = PendingCoinReminders[key]
+    if not entry or not entry.items then return end
+    local remaining = {}
+    for _, pendingID in ipairs(entry.items) do
+        if pendingID ~= itemID then
+            table.insert(remaining, pendingID)
+        end
+    end
+    entry.items = remaining
+    if #remaining == 0 then
+        PendingCoinReminders[key] = nil
+    end
+end
+local function MarkDropSeen(itemID, reason)
+    local key = FindReminderKeyForItem(itemID)
+    if not key then return end
+    local entry = PendingCoinReminders[key]
+    if not entry then return end
+    entry.dropSeen = true
+    entry.blockCoin = true
+    entry.dropSeenAt = GetTime()
+    LogCoinDebug(string.format("Drop seen for item %d (reason: %s) - blocking coin reminder.", itemID, reason or "unknown"))
+end
 local function ShowDropAlert(itemID, itemData)
     if not itemID and itemData and itemData.id then
         itemID = itemData.id
@@ -1026,6 +1080,7 @@ local function ShowDropAlert(itemID, itemData)
     end
     lastAnnouncedRollItemID = itemID
     lastAnnouncedRollTime = GetTime()
+    MarkDropSeen(itemID, "drop_alert")
     -- Auto-reset del estado DROP tras 45s si sigue pendiente
     C_Timer.After(45, function()
         if CurrentCharDB and CurrentCharDB[itemID] and CurrentCharDB[itemID].status == 1 then
@@ -1049,6 +1104,7 @@ local function ShowDropAlert(itemID, itemData)
         end
         PlaySound(12867)
     end)
+    LogAlertDebug("DROP alert shown for item " .. tostring(itemID))
 end
 -- Buffs de moneda MoP: Seal of Power (LFR), Seal of Fate (Normal)
 local bonusSpellIDs = {126938, 128362}
@@ -1067,6 +1123,7 @@ local function HasBonusRollBuff()
 end
 local function HandleBonusRollActivate(event, ...)
     LogCoinDebug("|cff00ffff[Coin Debug]|r BONUS_ROLL_ACTIVATE received")
+    LogCoinDebug(string.format("Bonus roll window visible: %s", tostring(IsBonusRollWindowVisible())))
     -- Iniciar secuencia de 2 fases (10s aviso -> 35s alerta)
     ActivatePendingForBonusRoll("bonus_roll_activate")
 end
@@ -1084,11 +1141,8 @@ end
 local function ScheduleCoinReminder(encounterID, bossName)
     if not CurrentCharDB or not bossName or bossName == "" or not (LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder.enabled) then return end
     local _, instanceType = IsInInstance()
-    if instanceType ~= "raid" then
-        LogCoinDebug(string.format("Skipping coin reminder for %s because instance type is %s.", bossName, tostring(instanceType)))
-        return
-    end
     LastCoinReminderBoss = bossName
+    local instanceName = (GetInstanceInfo and select(1, GetInstanceInfo())) or nil
     local pendingItems = {}
     for id, data in pairs(CurrentCharDB) do
         if type(id) == "number" and type(data) == "table" and data.status == 0 then
@@ -1098,8 +1152,39 @@ local function ScheduleCoinReminder(encounterID, bossName)
         end
     end
     if #pendingItems == 0 then 
+        if instanceName and instanceName ~= "" then
+            local instanceLower = string.lower(instanceName)
+            local hasInstanceItems = false
+            for id, data in pairs(CurrentCharDB) do
+                if type(id) == "number" and type(data) == "table" and data.boss and data.boss ~= "" and data.boss ~= L["UNKNOWN_SOURCE"] then
+                    local srcLower = string.lower(data.boss)
+                    if srcLower:find(instanceLower, 1, true) then
+                        hasInstanceItems = true
+                        break
+                    end
+                    local instPart = srcLower:match("^(.-)%s*%-%s*.+$")
+                    if instPart and instPart:find(instanceLower, 1, true) then
+                        hasInstanceItems = true
+                        break
+                    end
+                end
+            end
+            if hasInstanceItems and LootHunterDB and LootHunterDB.settings
+                and LootHunterDB.settings.lootAlerts
+                and LootHunterDB.settings.lootAlerts.bossNoItems then
+                local coloredBoss = string.format("|cffff0000%s|r", bossName)
+                print(string.format(L["COIN_NO_ITEMS_BOSS"], coloredBoss))
+                LogCoinDebug(string.format("Boss %s has no items in list (instance: %s).", bossName, instanceName))
+            end
+        else
+            LogCoinDebug(string.format("Skipping boss-no-items message for %s: instance name missing.", bossName))
+        end
         LogCoinDebug(string.format("No pending items matched %s. No reminder scheduled.", bossName))
         return 
+    end
+    if instanceType ~= "raid" then
+        LogCoinDebug(string.format("Skipping coin reminder for %s because instance type is %s.", bossName, tostring(instanceType)))
+        return
     end
     local itemList = {}
     for _, pendingID in ipairs(pendingItems) do
@@ -1113,14 +1198,16 @@ local function ScheduleCoinReminder(encounterID, bossName)
         encounterID = encounterID,
         items = pendingItems,
         timerStarted = false,
+        dropSeen = false,
+        blockCoin = false,
+        deathTime = GetTime(),
     }
-    if LootHunterDB.settings.coinReminder.preWarning and IsBonusRollWindowVisible() then
-        PendingCoinReminders[key].deferStartUntil = GetTime() + 3
-        PendingCoinReminders[key].skipPrewarn = true
+    if LootHunterDB.settings.coinReminder.preWarning then
         C_Timer.After(3, function()
             local entry = PendingCoinReminders[key]
             if not entry then return end
             if IsBonusRollWindowVisible() then
+                LogCoinDebug(string.format("Pre-warning window visible for %s: %s", entry.boss or "Unknown", tostring(IsBonusRollWindowVisible())))
                 local msg = string.format(L["COIN_PRE_WARNING"] or "|cff00ff00[Loot Hunter]|r %s might have your loot. Get your coin ready!", entry.boss)
                 if addonTable.ShowPreWarningFrame then
                     EnqueueAlert(6, ALERT_PRIORITY_PREWARN, function()
@@ -1131,11 +1218,8 @@ local function ScheduleCoinReminder(encounterID, bossName)
                     print(msg)
                     if PREWARN_SOUND_ID then PlaySound(PREWARN_SOUND_ID, "Master") end
                 end
-                StartTwoStageCoinReminder(key)
-                return
+                LogAlertDebug("Pre-warning shown for " .. (entry.boss or "Unknown"))
             end
-            entry.deferStartUntil = nil
-            entry.skipPrewarn = nil
         end)
     end
     local itemNames = {}
@@ -1144,21 +1228,26 @@ local function ScheduleCoinReminder(encounterID, bossName)
         table.insert(itemNames, data and (data.name or tostring(pendingID)) or tostring(pendingID))
     end
     LogCoinDebug(string.format("Scheduled coin reminder for %s with %d pending items: %s", bossName, #pendingItems, table.concat(itemNames, ", ")))
-    C_Timer.After(COIN_REMINDER_FALLBACK, function()
-        if not IsBonusRollWindowVisible() then
-            LogCoinDebug(string.format("Fallback timer for %s fired but Bonus Roll window is not visible, skipping reminder.", bossName))
+    C_Timer.After(30, function()
+        local entry = PendingCoinReminders[key]
+        if not entry then return end
+        if entry.dropSeen then
+            LogCoinDebug(string.format("No-drop timer skipped for %s because drop was seen.", entry.boss or "Unknown"))
             return
         end
-        LogCoinDebug(string.format("Fallback timer expired for %s. Forcing reminder.", bossName))
-        StartCoinReminderTimer(key, "fallback")
+        if not IsBonusRollWindowVisible() then
+            LogCoinDebug(string.format("No-drop timer for %s fired but Bonus Roll window is not visible, skipping reminder.", entry.boss or "Unknown"))
+            return
+        end
+        LogCoinDebug(string.format("No-drop timer expired for %s. Triggering reminder.", entry.boss or "Unknown"))
+        StartCoinReminderTimer(key, "no_drop", 0)
     end)
 end
 TriggerLootReadyTimers = function()
     for key, entry in pairs(PendingCoinReminders) do
         if entry then
             if not entry.timerStarted then
-                LogCoinDebug(string.format("Loot event ready/opened with pending reminder for %s.", entry.boss or "Unknown"))
-                StartCoinReminderTimer(key, "loot_event")
+                LogCoinDebug(string.format("Loot event ready/opened for %s (drop seen=%s).", entry.boss or "Unknown", tostring(entry.dropSeen)))
             elseif entry.isTwoStage then
                 -- Si abres el loot durante la espera larga, procesar inmediatamente
                 LogCoinDebug("Loot opened during 2-stage wait. Processing immediately.")
@@ -1171,21 +1260,14 @@ local function TriggerLootActivityTimerForItemID(itemID)
     if not itemID then return end
     itemID = tonumber(itemID)
     if not itemID then return end
-    LogCoinDebug(string.format("Loot activity detected for itemID %d.", itemID))
     for key, entry in pairs(PendingCoinReminders) do
         local match = false
         for _, pendingID in ipairs(entry.items) do
             if pendingID == itemID then match = true; break end
         end
         if match then
-            if not entry.timerStarted then
-                LogCoinDebug(string.format("Starting reminder early because item %d was seen in loot.", itemID))
-                StartCoinReminderTimer(key, "loot_activity")
-            elseif entry.isTwoStage then
-                -- Si vemos el item caer durante la espera larga, interrumpir y alertar YA
-                LogCoinDebug(string.format("Short-circuiting 2-stage timer because item %d was seen.", itemID))
-                ProcessCoinReminder(key)
-            end
+            LogCoinDebug(string.format("Loot activity detected for tracked itemID %d.", itemID))
+            MarkDropSeen(itemID, "loot_activity")
         end
     end
 end
@@ -1204,6 +1286,7 @@ local function ShowCoinReminderVisual(bossName)
         local soundID = (SOUNDKIT and SOUNDKIT.UI_BONUS_ROLL_START) or 12867
         PlaySound(soundID)
     end)
+    LogAlertDebug("Coin reminder manual alert shown for " .. (bossName or "Unknown"))
 end
 addonTable.ShowCoinReminderVisual = ShowCoinReminderVisual
 -- Manejadores de Boss Kill (ahora que ScheduleCoinReminder está definido)
@@ -1220,8 +1303,40 @@ local function HandleEncounterEnd(event, encounterID, bossName, _, endStatus)
     end
 end
 -- Patrones de loot multi-idioma basados en GlobalStrings
-local selfLootPattern = "^" .. (LOOT_ITEM_PUSHED_SELF or "You receive item: %s."):gsub("%%s", "(.+)") .. "$"
-local otherLootPattern = "^" .. (LOOT_ITEM_PUSHED or "%s receives item: %s."):gsub("%%s", "(.-)", 1):gsub("%%s", "(.+)") .. "$"
+local function BuildSelfLootPatterns()
+    local patterns = {}
+    local formats = {
+        LOOT_ITEM_PUSHED_SELF,
+        LOOT_ITEM_SELF,
+        LOOT_ITEM_SELF_MULTIPLE,
+    }
+    for _, fmt in ipairs(formats) do
+        if type(fmt) == "string" and fmt ~= "" then
+            local pattern = "^" .. fmt:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
+            table.insert(patterns, pattern)
+        end
+    end
+    return patterns
+end
+
+local function BuildOtherLootPatterns()
+    local patterns = {}
+    local formats = {
+        LOOT_ITEM_PUSHED,
+        LOOT_ITEM,
+        LOOT_ITEM_MULTIPLE,
+    }
+    for _, fmt in ipairs(formats) do
+        if type(fmt) == "string" and fmt ~= "" then
+            local pattern = "^" .. fmt:gsub("%%s", "(.-)", 1):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
+            table.insert(patterns, pattern)
+        end
+    end
+    return patterns
+end
+
+local selfLootPatterns = BuildSelfLootPatterns()
+local otherLootPatterns = BuildOtherLootPatterns()
 local rollResultPattern = "^" .. (RANDOM_ROLL_RESULT or "%s rolls %d (%d-%d)"):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
 local function IsPlayerRollMessage(msg)
     if type(msg) ~= "string" then return false end
@@ -1259,17 +1374,24 @@ local function HandleChatLoot(event, msg, ...)
     local itemLink, playerName
     local isMine = false
     -- Comprueba si el jugador mismo despojó el objeto
-    local _, _, capturedItemLink = string.find(msg, selfLootPattern)
-    if capturedItemLink then
-        itemLink = capturedItemLink
-        isMine = true
-    else
+    for _, pattern in ipairs(selfLootPatterns) do
+        local capturedItemLink = msg:match(pattern)
+        if capturedItemLink then
+            itemLink = capturedItemLink
+            isMine = true
+            break
+        end
+    end
+    if not itemLink then
         -- Comprueba si alguien más despojó el objeto
-        local _, _, capturedPlayer, capturedItemLink2 = string.find(msg, otherLootPattern)
-        if capturedPlayer and capturedItemLink2 then
-            playerName = capturedPlayer
-            itemLink = capturedItemLink2
-            isMine = (playerName == UnitName("player"))
+        for _, pattern in ipairs(otherLootPatterns) do
+            local capturedPlayer, capturedItemLink2 = msg:match(pattern)
+            if capturedPlayer and capturedItemLink2 then
+                playerName = capturedPlayer
+                itemLink = capturedItemLink2
+                isMine = (playerName == UnitName("player"))
+                break
+            end
         end
     end
     if not itemLink then return end
@@ -1283,6 +1405,7 @@ local function HandleChatLoot(event, msg, ...)
                 itemData.status = 2
                 itemData.lastState = "won"
                 LootHunter_RefreshUI()
+                RemoveItemFromReminder(id)
                 if LootHunterDB.settings.lootAlerts.itemWon then
                     local winTitle = CreateGradient(L["WIN_ALERT_TITLE"], 0.35, 1, 0.35, 0.65, 1, 0.65)
                     local winDesc = CreateGradient(L["WIN_ALERT_DESC"], 0.35, 1, 0.35, 0.65, 1, 0.65)
@@ -1296,6 +1419,7 @@ local function HandleChatLoot(event, msg, ...)
                         PlaySound(12891)
                     end)
                     print(string.format(L["CONGRATS_CHAT_MSG"], itemData.link))
+                    LogAlertDebug("WIN alert shown for item " .. tostring(id))
                 end
             end
         else
@@ -1317,6 +1441,7 @@ local function HandleChatLoot(event, msg, ...)
                         if addonTable.PlayOtherWonSound then addonTable.PlayOtherWonSound() end
                         if addonTable.FlashScreen then addonTable.FlashScreen("RED") end
                     end
+                    LogAlertDebug("OTHER_WON alert shown for item " .. tostring(id))
                     if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder
                         and LootHunterDB.settings.coinReminder.enabled
                         and IsBonusRollWindowVisible() then
@@ -1330,6 +1455,7 @@ local function HandleChatLoot(event, msg, ...)
                                     if COIN_LOST_SOUND_ID then
                                         PlaySound(COIN_LOST_SOUND_ID, "Master")
                                     end
+                                    LogAlertDebug("COIN_LOST_REMINDER alert shown for item " .. tostring(id))
                                     C_Timer.After(6, function()
                                         if IsBonusRollWindowVisible() then
                                             local followMsg = L["COIN_LOST_REMINDER_FOLLOWUP"]
@@ -1339,6 +1465,7 @@ local function HandleChatLoot(event, msg, ...)
                                                 if COIN_LOST_SOUND_ID then
                                                     PlaySound(COIN_LOST_SOUND_ID, "Master")
                                                 end
+                                                LogAlertDebug("COIN_LOST_REMINDER_FOLLOWUP alert shown for item " .. tostring(id))
                                             end)
                                         end
                                     end)
@@ -1352,13 +1479,8 @@ local function HandleChatLoot(event, msg, ...)
                         LogCoinDebug("Bonus roll available after another player won your item.")
                     end
                     lastPlayerRollItemID = nil
-                    -- Activa el recordatorio de moneda inmediatamente si corresponde
-                    local key = FindReminderKeyForItem(id)
-                    if key then
-                        ProcessCoinReminder(key)
-                    else
-                        ActivatePendingForBonusRoll("other_won")
-                    end
+                    RemoveItemFromReminder(id)
+                    -- El recordatorio de moneda usa la alerta de pérdida si el bonus roll sigue activo
                 end
                 -- Auto reset tras 45s si sigue en estado drop
                 C_Timer.After(45, function()
@@ -1473,12 +1595,6 @@ local function HandleChatLinkAnnounce(event, msg, sender, ...)
         local itemID = tonumber(link:match("item:(%d+):"))
         if itemID and CurrentCharDB[itemID] and CurrentCharDB[itemID].status == 0 then
             ShowDropAlert(itemID, CurrentCharDB[itemID])
-            local key = FindReminderKeyForItem(itemID)
-            if key then
-                StartCoinReminderTimer(key, "chat_link")
-            else
-                ActivatePendingForBonusRoll("chat_link")
-            end
             LootHunter_RefreshUI()
         end
         if itemID then

@@ -367,8 +367,22 @@ local LOOTHUNTER_CONFIRM_RESET = {
     button1 = OKAY,
     button2 = CANCEL,
     OnAccept = function()
-        LootHunterDB = nil
-        if addonTable then addonTable.db = nil end
+        if LootHunterDB then
+            local name = UnitName("player") or ""
+            local realm = GetRealmName and GetRealmName() or ""
+            local charKey = name .. " - " .. realm
+            if LootHunterDB.Characters then
+                LootHunterDB.Characters[charKey] = {}
+                if addonTable then
+                    addonTable.CurrentCharDB = LootHunterDB.Characters[charKey]
+                end
+            end
+            LootHunterDB.settings = nil
+            LootHunterDB.windowSettings = nil
+            LootHunterDB.buttonPos = nil
+            LootHunterDB.minimap = nil
+            if addonTable then addonTable.db = LootHunterDB end
+        end
         ReloadUI()
     end,
     timeout = 0,
@@ -1485,7 +1499,6 @@ function LootHunter_CreateGUI()
     -- 5. VISTA CREDITOS
     local creditsTitle = CreateHelpText(viewCredits, L["HELP_CREDITS_TITLE"], nil, -4, true)
     ApplySubtitleStyle(creditsTitle)
-    -- Solo titulo para creditos
 
     -- Créditos (En el sidebar abajo)
     local creditsBtn = CreateFrame("Button", nil, sidebar, "BackdropTemplate")

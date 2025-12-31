@@ -16,6 +16,14 @@ All notable changes to this project will be documented in this file.
 - Added Bug Report help section with copy-friendly links + localized copy hint text.
 - Spec row dropdown now closes when clicking outside and stays anchored to the row.
 - Removed Status help scrollbar visuals while keeping mousewheel scrolling.
+- Coin reminder now waits 30s after boss death if no drop was seen; drop blocks coin reminders until roll resolution.
+- Pre-warning now checks 3s after boss death when the bonus roll window is visible.
+- Added alert debug logging for prewarning/drop/win/other-won/coin reminders.
+- Added optional chat alert when a boss has no items on your list (only if the instance has tracked items).
+- Added Loot Alerts "Miscellaneous" subsection with toggle for boss-no-items alert.
+- Added debug logging for bonus roll window visibility checks.
+- Reduced loot debug spam to tracked items only.
+- Help icon reset now clears all settings and minimap/window state, but only resets the current character's list.
 
 ## 1.4-test
 - Added primary color theming via a single hex value and applied it across UI accents.
@@ -47,3 +55,7 @@ All notable changes to this project will be documented in this file.
 - Spec changes per item list entry.
 - Added multi-language support.
 - Updated coin reminder system alerts.
+
+## 1.0-test
+- Initial release.
+- Coin system and List emerges from the void.

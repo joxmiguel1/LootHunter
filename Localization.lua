@@ -188,6 +188,7 @@ L["HELP_BUGS_LINK_LABEL"] = "Bug report link:"
 L["HELP_BUGS_DISCORD_DESC"] = "\n\nPrefer Discord? Share bugs, feedback, or suggestions with the community."
 L["HELP_BUGS_DISCORD_LABEL"] = "Discord link:"
 L["HELP_BUGS_COPY_HINT"] = "CTRL + C to copy"
+L["COIN_NO_ITEMS_BOSS"] = "|cff00ff00[Loot Hunter]|r %s has no items in your list."
 L["HELP_CREDITS_TITLE"] = "Credits"
 L["SPEC_TOOLTIP"] = "Click to change spec."
 L["TIER_TOKEN_SOURCE"] = "Tier token"
@@ -195,7 +196,7 @@ L["TIER_TOKEN_FOR"] = "Tier token for %s%s"
 L["BTN_CLEAR_TOOLTIP"] = "|cffff0000Clear entire list|r\nAll saved items will be removed."
 L["ASSET_MISSING_MSG"] = "|cffff0000[Loot Hunter] Missing assets: %s|r"
 L["ASSET_MISSING_HINT"] = "[Loot Hunter] Verify the addon folder name is LootHunter."
-L["RESET_ENV_PROMPT"] = "Reset Loot Hunter settings and saved data? This will reload the UI."
+L["RESET_ENV_PROMPT"] = "Reset Loot Hunter data for this character? This will reload the UI."
 
 -- Settings
 L["SETTINGS"] = "Settings"
@@ -217,7 +218,10 @@ L["SETTING_ALERTS_WON_DESC"] = "Shows a special alert when you win an item from 
 L["SETTING_ALERTS_SEEN_LABEL"] = 'Enable "Item Seen" Alert'
 L["SETTING_ALERTS_SEEN_DESC"] = "Shows an alert when an item from your list is seen in loot (chat/loot events), even if another player loots it."
 L["SETTING_ALERTS_OTHER_SOUND_LABEL"] = "Play sound when others win your item"
-L["SETTING_ALERTS_OTHER_SOUND_DESC"] = "When someone else takes your item, Bolvar's famous lament will play so you never forget the moment."
+L["SETTING_ALERTS_OTHER_SOUND_DESC"] = "When someone else takes your item, Bolvar's famous lament will play so you never forget the moment.\n"
+L["SETTING_ALERTS_MISC_TITLE"] = "Miscellaneous"
+L["SETTING_ALERTS_BOSS_NONE_LABEL"] = "Warn if boss has no items in your list"
+L["SETTING_ALERTS_BOSS_NONE_DESC"] = "Shows a chat message on boss death when that boss has no items from your list."
 L["SETTING_GENERAL_LOCK_LABEL"] = "Lock Window Size"
 L["SETTING_GENERAL_LOCK_DESC"] = "Prevents the main window from being resized.\n" .. ColorPrimary("(Requires UI reload)")
 L["SETTING_GENERAL_SCALE_LABEL"] = "Addon Scale"
@@ -369,9 +373,10 @@ local function ApplySpanish()
     L["HELP_BUGS_TITLE"] = "Reporte de Bugs"
     L["HELP_BUGS_DESC"] = "Usa este enlace para reportar bugs y poder darles seguimiento."
     L["HELP_BUGS_LINK_LABEL"] = "Enlace para reportar bug:"
-    L["HELP_BUGS_DISCORD_DESC"] = "Si prefieres Discord, comparte bugs, sugerencias o quejas con la comunidad."
+    L["HELP_BUGS_DISCORD_DESC"] = "\n\nSi prefieres Discord, comparte bugs, sugerencias o quejas con la comunidad."
     L["HELP_BUGS_DISCORD_LABEL"] = "Enlace de Discord:"
     L["HELP_BUGS_COPY_HINT"] = "CTRL + C para copiar"
+    L["COIN_NO_ITEMS_BOSS"] = "|cff00ff00[Loot Hunter]|r %s no tiene items en tu lista."
     L["HELP_CREDITS_TITLE"] = "Créditos"
     L["SPEC_TOOLTIP"] = "Haz clic para cambiar la spec."
     L["TIER_TOKEN_SOURCE"] = "Token de tier"
@@ -379,7 +384,7 @@ local function ApplySpanish()
     L["BTN_CLEAR_TOOLTIP"] = "|cffff0000Borrar toda la lista|r\nTodos los objetos guardados se eliminarán."
     L["ASSET_MISSING_MSG"] = "|cffff0000[Loot Hunter] Faltan archivos: %s|r"
     L["ASSET_MISSING_HINT"] = "[Loot Hunter] Verifica que la carpeta del addon se llame LootHunter."
-    L["RESET_ENV_PROMPT"] = "Restablecer Loot Hunter? Se borraran ajustes y datos guardados y se recargara la interfaz."
+    L["RESET_ENV_PROMPT"] = "Restablecer los datos de Loot Hunter para este personaje? Se recargara la interfaz."
 
     -- Settings
     L["SETTINGS"] = "Configuración"
@@ -401,7 +406,10 @@ local function ApplySpanish()
     L["SETTING_ALERTS_SEEN_LABEL"] = 'Activar Alerta de "Objeto Visto"'
     L["SETTING_ALERTS_SEEN_DESC"] = "Muestra una alerta cuando se detecta un objeto de tu lista en el botín (chat/eventos de botín), incluso si lo saquea otro jugador."
     L["SETTING_ALERTS_OTHER_SOUND_LABEL"] = "Reproducir sonido cuando otro gana tu objeto"
-    L["SETTING_ALERTS_OTHER_SOUND_DESC"] = "Cuando otro se lleva tu ítem, sonará el célebre lamento de Bolvar para no olvidar el momento."
+    L["SETTING_ALERTS_OTHER_SOUND_DESC"] = "Cuando otro se lleva tu ítem, sonará el célebre lamento de Bolvar para no olvidar el momento.\n"
+    L["SETTING_ALERTS_MISC_TITLE"] = "Misceláneos"
+    L["SETTING_ALERTS_BOSS_NONE_LABEL"] = "Avisar si el boss no tiene ítems en tu lista"
+    L["SETTING_ALERTS_BOSS_NONE_DESC"] = "Muestra un mensaje en el chat cuando muere un boss que no tiene ítems de tu lista."
     L["SETTING_GENERAL_LOCK_LABEL"] = "Bloquear Dimensiones"
     L["SETTING_GENERAL_LOCK_DESC"] = "Impide que la ventana principal se pueda redimensionar.\n" .. ColorPrimary("(Requiere /reload)")
     L["SETTING_GENERAL_SCALE_LABEL"] = "Escala del addon"
