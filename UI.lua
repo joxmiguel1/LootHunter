@@ -268,6 +268,33 @@ preWarnFrame:SetBackdrop({
 preWarnFrame:SetBackdropColor(0, 0, 0, 0.75)
 preWarnFrame:SetBackdropBorderColor(0, 0, 0, 1)
 preWarnFrame:Hide()
+preWarnFrame.fadeAnim = preWarnFrame:CreateAnimationGroup()
+local fadeOut = preWarnFrame.fadeAnim:CreateAnimation("Alpha")
+fadeOut:SetFromAlpha(1)
+fadeOut:SetToAlpha(0)
+fadeOut:SetDuration(3.6)
+fadeOut:SetSmoothing("IN_OUT")
+preWarnFrame.shakeAnim = preWarnFrame:CreateAnimationGroup()
+preWarnFrame.shakeAnim:SetLooping("NONE")
+local shakeLeft = preWarnFrame.shakeAnim:CreateAnimation("Translation")
+shakeLeft:SetOffset(-12, 0)
+shakeLeft:SetDuration(0.12)
+shakeLeft:SetOrder(1)
+local shakeRight = preWarnFrame.shakeAnim:CreateAnimation("Translation")
+shakeRight:SetOffset(24, 0)
+shakeRight:SetDuration(0.12)
+shakeRight:SetOrder(2)
+local shakeCenter = preWarnFrame.shakeAnim:CreateAnimation("Translation")
+shakeCenter:SetOffset(-12, 0)
+shakeCenter:SetDuration(0.12)
+shakeCenter:SetOrder(3)
+preWarnFrame.shakeAnim:SetScript("OnFinished", function(self)
+    local loops = (self._loops or 0) + 1
+    self._loops = loops
+    if loops < 2 then
+        self:Play()
+    end
+end)
 
 local preWarnText = preWarnFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
 preWarnText:SetPoint("CENTER")
@@ -278,7 +305,7 @@ preWarnText:SetTextColor(1, 1, 1)
 preWarnText:SetFont(ACCENT_FONT, 18, "THICKOUTLINE")
 ApplyAccentFontRecursive(preWarnFrame)
 
-function addonTable.ShowPreWarningFrame(text, duration)
+function addonTable.ShowPreWarningFrame(text, duration, enableShake, enableFade)
     if not text or text == "" then return end
     do
         preWarnText:SetFont(ACCENT_FONT, 18, "THICKOUTLINE")
@@ -287,8 +314,30 @@ function addonTable.ShowPreWarningFrame(text, duration)
     end
     preWarnText:SetText(text)
     preWarnFrame:Show()
+    preWarnFrame:SetAlpha(1)
+    local shake = (enableShake == nil) and true or enableShake
+    local fade = (enableFade == true)
+    if shake and preWarnFrame.shakeAnim then
+        if preWarnFrame.shakeAnim:IsPlaying() then
+            preWarnFrame.shakeAnim:Stop()
+        end
+        preWarnFrame.shakeAnim._loops = 0
+        preWarnFrame.shakeAnim:Play()
+    end
     local displayTime = duration or 4
-    C_Timer.After(displayTime, function()
+    local fadeDuration = (fade and fadeOut and fadeOut.GetDuration and fadeOut:GetDuration()) or 0
+    if fade and preWarnFrame.fadeAnim then
+        if preWarnFrame.fadeAnim:IsPlaying() then
+            preWarnFrame.fadeAnim:Stop()
+        end
+        local delay = math.max(0, displayTime)
+        fadeOut:SetStartDelay(delay)
+        preWarnFrame.fadeAnim:Play()
+    end
+    C_Timer.After(displayTime + fadeDuration, function()
+        if preWarnFrame and preWarnFrame.shakeAnim then
+            preWarnFrame.shakeAnim:Stop()
+        end
         if preWarnFrame then preWarnFrame:Hide() end
     end)
 end

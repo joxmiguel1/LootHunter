@@ -11,6 +11,7 @@ local ResolveAllUnknownSources
 local LogCoinDebug
 local GetCurrentSpecName
 local MOPTierSelected = false
+local ShowDropAlert
 local function RequestItemData(itemID)
     if C_Item and C_Item.RequestLoadItemDataByID then
         C_Item.RequestLoadItemDataByID(itemID)
@@ -916,7 +917,16 @@ local function ProcessCoinReminder(key)
         return 
     end
     if LootHunterDB.settings.coinReminder.visualAlert then
-        local msg = ICON_DIAMOND .. string.format(L["COIN_REMINDER_RAID_MSG"], entry.boss) .. ICON_DIAMOND
+        local rawText = string.format(L["COIN_REMINDER_RAID_MSG"], entry.boss)
+        local visualText = (addonTable.CreateGradient and addonTable.CreateGradient(rawText, 1, 0.85, 0.35, 1, 0.75, 0)) or rawText
+        local msg = ICON_DIAMOND .. visualText .. ICON_DIAMOND
+        local chatFmt = L["COIN_REMINDER_RAID_CHAT"] or L["COIN_REMINDER_RAID_MSG"]
+        local chatMsg = string.format(chatFmt, entry.boss)
+        if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+            DEFAULT_CHAT_FRAME:AddMessage(chatMsg)
+        else
+            print(chatMsg)
+        end
         EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_SECONDARY, function()
             if addonTable.ShowAlert then
                 addonTable.ShowAlert(msg, 1, 0.85, 0)
@@ -1141,7 +1151,7 @@ local function IsBonusRollWindowVisible()
     local frame = _G.BonusRollFrame
     return frame and frame:IsShown()
 end
-local function ScheduleCoinReminder(encounterID, bossName)
+local function ScheduleCoinReminder(encounterID, bossName, forceRaid, forcePreWarn)
     if not CurrentCharDB or not bossName or bossName == "" or not (LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder.enabled) then return end
     local _, instanceType = IsInInstance()
     LastCoinReminderBoss = bossName
@@ -1185,7 +1195,7 @@ local function ScheduleCoinReminder(encounterID, bossName)
         LogCoinDebug(string.format("No pending items matched %s. No reminder scheduled.", bossName))
         return 
     end
-    if instanceType ~= "raid" then
+    if not forceRaid and instanceType ~= "raid" then
         LogCoinDebug(string.format("Skipping coin reminder for %s because instance type is %s.", bossName, tostring(instanceType)))
         return
     end
@@ -1209,16 +1219,21 @@ local function ScheduleCoinReminder(encounterID, bossName)
         C_Timer.After(3, function()
             local entry = PendingCoinReminders[key]
             if not entry then return end
-            if IsBonusRollWindowVisible() then
-                LogCoinDebug(string.format("Pre-warning window visible for %s: %s", entry.boss or "Unknown", tostring(IsBonusRollWindowVisible())))
+            local windowVisible = IsBonusRollWindowVisible()
+            if windowVisible or forcePreWarn then
+                LogCoinDebug(string.format("Pre-warning window visible for %s: %s", entry.boss or "Unknown", tostring(windowVisible)))
                 local msg = string.format(L["COIN_PRE_WARNING"] or "|cff00ff00[Loot Hunter]|r %s might have your loot. Get your coin ready!", entry.boss)
+                if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+                    DEFAULT_CHAT_FRAME:AddMessage(msg)
+                else
+                    print(msg)
+                end
                 if addonTable.ShowPreWarningFrame then
                     EnqueueAlert(6, ALERT_PRIORITY_PREWARN, function()
                         addonTable.ShowPreWarningFrame(msg, 6)
                         if PREWARN_SOUND_ID then PlaySound(PREWARN_SOUND_ID, "Master") end
                     end)
                 else
-                    print(msg)
                     if PREWARN_SOUND_ID then PlaySound(PREWARN_SOUND_ID, "Master") end
                 end
                 LogAlertDebug("Pre-warning shown for " .. (entry.boss or "Unknown"))
@@ -1432,11 +1447,12 @@ local function HandleChatLoot(event, msg, ...)
                 if LootHunterDB.settings.lootAlerts.itemSeen then
                     -- Solo mensaje local cuando otro jugador lo obtiene; sin alerta visual/sonora.
                     local looter = playerName or L["UNKNOWN_SOURCE"]
-                    local otherMsg = string.format(L["DROP_OTHER_CHAT_MSG"], itemData.link or itemData.name or "?", looter)
+                    local coloredLooter = string.format("|cffff0000%s|r", looter)
+                    local otherMsg = string.format(L["DROP_OTHER_CHAT_MSG"], itemData.link or itemData.name or "?", coloredLooter)
                     print(otherMsg)
                     if addonTable.ShowPreWarningFrame then
                         EnqueueAlert(6, ALERT_PRIORITY_PRIMARY, function()
-                            addonTable.ShowPreWarningFrame(otherMsg, 6)
+                            addonTable.ShowPreWarningFrame(otherMsg, 6, false, true)
                             if addonTable.PlayOtherWonSound then addonTable.PlayOtherWonSound() end
                             if addonTable.FlashScreen then addonTable.FlashScreen("RED") end
                         end)
@@ -2074,8 +2090,109 @@ function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
         TryResolveSourceAsync(id)
     end
 end
+
+local function ParseItemArg(arg)
+    if not arg or arg == "" then return nil, nil end
+    local link = arg:match("|Hitem:.-|h.-|h") or arg
+    local id = tonumber(link:match("item:(%d+)")) or tonumber(link)
+    return id, link
+end
+
+local function EnsureItemEntry(itemID, itemLink)
+    if not itemID then return nil end
+    if CurrentCharDB and CurrentCharDB[itemID] then
+        return CurrentCharDB[itemID]
+    end
+    local name, resolvedLink, quality = GetItemInfo(itemID)
+    local displayLink = resolvedLink or itemLink
+    local displayName = name or L["LOADING"]
+    if quality and GetItemQualityColor and name then
+        local color = select(4, GetItemQualityColor(quality))
+        if color then
+            displayName = string.format("|c%s%s|r", color, name)
+        end
+    end
+    CurrentCharDB[itemID] = {
+        name = displayName,
+        link = displayLink or displayName,
+        slot = "RAID_TOKEN",
+        icon = select(10, GetItemInfo(itemID)),
+        boss = L["UNKNOWN_SOURCE"],
+        bisType = nil,
+        spec = ResolveSpecName(),
+        specID = ResolveSpecID(),
+        isHeroic = false,
+        status = 0,
+    }
+    return CurrentCharDB[itemID]
+end
 SLASH_LOOTHUNTER1 = "/loothunter"
 SLASH_LOOTHUNTER2 = "/lh"
 SlashCmdList["LOOTHUNTER"] = function(msg)
     LootHunter_CreateGUI()
+end
+
+SLASH_LOOTHUNTER_BOSS1 = "/lh_boss"
+SlashCmdList["LOOTHUNTER_BOSS"] = function(msg)
+    local bossName = msg and msg:match("^%s*(.-)%s*$") or ""
+    if bossName == "" then
+        print("[Loot Hunter] Usage: /lh_boss <boss name>")
+        return
+    end
+    ScheduleCoinReminder(nil, bossName, true, true)
+    C_Timer.After(5, function()
+        if CurrentCharDB then
+            for id, data in pairs(CurrentCharDB) do
+                if type(id) == "number" and type(data) == "table" and data.status == 0 then
+                    if ItemMatchesBossSource(data, bossName) then
+                        ShowDropAlert(id, data)
+                        LootHunter_RefreshUI()
+                    end
+                end
+            end
+        end
+    end)
+end
+
+SLASH_LOOTHUNTER_DROP1 = "/lh_drop"
+SlashCmdList["LOOTHUNTER_DROP"] = function(msg)
+    if not CurrentCharDB then return end
+    local itemID, itemLink = ParseItemArg(msg or "")
+    if not itemID then
+        print("[Loot Hunter] Usage: /lh_drop <itemID or itemLink>")
+        return
+    end
+    local entry = EnsureItemEntry(itemID, itemLink)
+    ShowDropAlert(itemID, entry)
+    LootHunter_RefreshUI()
+end
+
+SLASH_LOOTHUNTER_WON1 = "/lh_won"
+SlashCmdList["LOOTHUNTER_WON"] = function(msg)
+    if not CurrentCharDB then return end
+    local itemID, itemLink = ParseItemArg(msg or "")
+    if not itemID then
+        print("[Loot Hunter] Usage: /lh_won <itemID or itemLink>")
+        return
+    end
+    local entry = EnsureItemEntry(itemID, itemLink)
+    if entry and entry.status ~= 2 then
+        entry.status = 2
+        entry.lastState = "won"
+        LootHunter_RefreshUI()
+        if LootHunterDB.settings.lootAlerts.itemWon then
+            local winTitle = CreateGradient(L["WIN_ALERT_TITLE"], 0.35, 1, 0.35, 0.65, 1, 0.65)
+            local winDesc = CreateGradient(L["WIN_ALERT_DESC"], 0.35, 1, 0.35, 0.65, 1, 0.65)
+            local winBanner = string.format("%s %s %s", ICON_STAR, winTitle, ICON_STAR)
+            local itemLine = entry.link or entry.name or "?"
+            EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_PRIMARY, function()
+                if addonTable.FlashScreen then addonTable.FlashScreen("WIN") end
+                if addonTable.ShowAlert then
+                    addonTable.ShowAlert(string.format("%s\n%s\n%s", winBanner, winDesc, itemLine), 0, 1, 0)
+                end
+                PlaySound(12891)
+            end)
+            print(string.format(L["CONGRATS_CHAT_MSG"], itemLine))
+        end
+    end
 end

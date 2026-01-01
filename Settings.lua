@@ -601,6 +601,11 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     local function PreviewCoinPreWarn()
         local boss = L["COIN_REMINDER_PREVIEW"] or "Preview Boss"
         local msg = string.format(L["COIN_PRE_WARNING"] or "|cff00ff00[Loot Hunter]|r %s might have your loot. Get your coin ready!", boss)
+        if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+            DEFAULT_CHAT_FRAME:AddMessage(msg)
+        else
+            print(msg)
+        end
         if addonTable.ShowPreWarningFrame then
             addonTable.ShowPreWarningFrame(msg, 6)
         else
@@ -612,6 +617,13 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     local function PreviewCoinVisual()
         if addonTable.ResetPreviewVisuals then addonTable.ResetPreviewVisuals() end
         if addonTable.ShowCoinReminderVisual then
+            local chatFmt = L["COIN_REMINDER_RAID_CHAT"] or L["COIN_REMINDER_RAID_MSG"]
+            local chatMsg = string.format(chatFmt, L["COIN_REMINDER_PREVIEW"] or "Preview Boss")
+            if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+                DEFAULT_CHAT_FRAME:AddMessage(chatMsg)
+            else
+                print(chatMsg)
+            end
             addonTable.ShowCoinReminderVisual(L["COIN_REMINDER_PREVIEW"] or "Preview Boss")
             local id = (addonTable.db and addonTable.db.settings and addonTable.db.settings.coinReminder and addonTable.db.settings.coinReminder.soundFile) or 12867
             PlaySound(id, "Master")
@@ -641,6 +653,9 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         local winDesc = (addonTable.CreateGradient and addonTable.CreateGradient(L["WIN_ALERT_DESC"], 0.35, 1, 0.35, 0.65, 1, 0.65)) or (L["WIN_ALERT_DESC"] or "You won")
         local winBanner = string.format("%s %s %s", ICON_STAR, winTitle, ICON_STAR)
         local itemLine = "|cffa335ee[Preview Item]|r"
+        if L["CONGRATS_CHAT_MSG"] then
+            print(string.format(L["CONGRATS_CHAT_MSG"], itemLine))
+        end
         if addonTable.FlashScreen then addonTable.FlashScreen("WIN") end
         if addonTable.ShowAlert then
             addonTable.ShowAlert(string.format("%s\n%s\n%s", winBanner, winDesc, itemLine), 0, 1, 0)
@@ -653,6 +668,9 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     local function PreviewItemSeen()
         if addonTable.ResetPreviewVisuals then addonTable.ResetPreviewVisuals() end
         local itemName = "|cffa335ee[Preview Item]|r"
+        if L["DROP_CHAT_MSG"] then
+            print(string.format(L["DROP_CHAT_MSG"], itemName))
+        end
         if addonTable.FlashScreen then addonTable.FlashScreen("ORANGE") end
         local dropTitle = (addonTable.CreateGradient and addonTable.CreateGradient(L["DROP_ALERT_TITLE"], 1, 0.7, 0.2, 1, 0.45, 0)) or (L["DROP_ALERT_TITLE"] or "[DROP] ALERT")
         local dropHeader = string.format("%s %s %s", ICON_DIAMOND, dropTitle, ICON_DIAMOND)
@@ -671,11 +689,13 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         if addonTable.ResetPreviewVisuals then addonTable.ResetPreviewVisuals() end
         local fakeItem = "|cffa335ee[Corrupted Ashbringer]|r"
         local fakeWinner = "Arthas Menethil"
-        local msg = string.format(L["DROP_OTHER_CHAT_MSG"] or "%s was won by %s.", fakeItem, fakeWinner)
+        local coloredWinner = string.format("|cffff0000%s|r", fakeWinner)
+        local msg = string.format(L["DROP_OTHER_CHAT_MSG"] or "%s was won by %s.", fakeItem, coloredWinner)
+        print(msg)
         if addonTable.PlayOtherWonSound then addonTable.PlayOtherWonSound(true) end
         if addonTable.FlashScreen then addonTable.FlashScreen("RED") end
         if addonTable.ShowPreWarningFrame then
-            addonTable.ShowPreWarningFrame(msg)
+            addonTable.ShowPreWarningFrame(msg, nil, false, true)
         else
             print(msg)
         end

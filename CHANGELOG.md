@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.5.1-test
+- Added debug slash commands: `/lh_boss`, `/lh_drop`, `/lh_won`.
+- Added pre-warning shake animation and other-won fade (testable in preview and live).
+- Added colored chat formatting for DROP and other-won messages.
+- Added boss-no-items chat option under Loot Alerts > Miscellaneous.
+- Improved coin reminder flow: drop blocks reminders; no-drop triggers after 30s.
+- Added chat output for pre-warning and coin reminder alerts.
+- Added `.pkgmeta` for CurseForge packaging.
+
 ## 1.5-test
 - Queued visual alerts to avoid overlaps (loot/coin/pre-warning).
 - Added first-time help button pulse glow until Help is opened.

@@ -40,7 +40,6 @@ This addon eliminates human error from your raids:
 3.  **Shift+Click** the item.
 4.  **Done!** You can close everything now. Loot Hunter will watch that item for you forever.
 
-undefined
 
 ## 🗺️ Minimap Button
 
