@@ -24,6 +24,13 @@ local DEFAULT_WINDOW_WIDTH = 510
 local DEFAULT_WINDOW_HEIGHT = 456
 addonTable.DEFAULT_WINDOW_WIDTH = DEFAULT_WINDOW_WIDTH
 addonTable.DEFAULT_WINDOW_HEIGHT = DEFAULT_WINDOW_HEIGHT
+
+local function ElevateDropdown(frame, anchor)
+    if not frame then return end
+    frame:SetFrameStrata("TOOLTIP")
+    local base = (anchor and anchor.GetFrameLevel and anchor:GetFrameLevel()) or 0
+    frame:SetFrameLevel(base + 50)
+end
 local function AdjustFontSize(fs, delta)
     if not fs then return end
     local font, size, flags = fs:GetFont()
@@ -93,7 +100,6 @@ local function ShowRowSpecMenu(anchor, entry)
         })
         specRowMenuFrame:SetBackdropColor(0.15, 0.15, 0.15, 0.95)
         specRowMenuFrame:SetBackdropBorderColor(0, 0, 0, 1)
-        specRowMenuFrame:SetFrameStrata("DIALOG")
         specRowMenuFrame:EnableMouse(true)
         specRowMenuFrame:SetScript("OnHide", function(self)
             if self._ownerRow then
@@ -105,7 +111,7 @@ local function ShowRowSpecMenu(anchor, entry)
     end
     if not specRowMenuOverlay then
         specRowMenuOverlay = CreateFrame("Button", nil, UIParent)
-        specRowMenuOverlay:SetFrameStrata("DIALOG")
+        specRowMenuOverlay:SetFrameStrata("TOOLTIP")
         specRowMenuOverlay:EnableMouse(true)
         specRowMenuOverlay:SetAllPoints(UIParent)
         specRowMenuOverlay:Hide()
@@ -152,6 +158,7 @@ local function ShowRowSpecMenu(anchor, entry)
     specRowMenuFrame:SetWidth(110)
     specRowMenuFrame:ClearAllPoints()
     specRowMenuFrame:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
+    ElevateDropdown(specRowMenuFrame, anchor)
     specRowMenuOverlay:Show()
     if entry.row then
         entry.row._specMenuOpen = true
@@ -200,7 +207,7 @@ local TEX_ARROW = ADDON_FOLDER .. "Textures\\icon_arrow.tga"
 local alertMsgFrame = CreateFrame("MessageFrame", "LootHunterMsgFrame", UIParent)
 alertMsgFrame:SetSize(600, 100)
 alertMsgFrame:SetPoint("CENTER", 0, 150)
-alertMsgFrame:SetFrameStrata("DIALOG")
+alertMsgFrame:SetFrameStrata("FULLSCREEN_DIALOG")
 alertMsgFrame:SetInsertMode("TOP")
 alertMsgFrame:SetFading(true)
 alertMsgFrame:SetFadeDuration(0.5)
@@ -259,7 +266,7 @@ end
 local preWarnFrame = CreateFrame("Frame", "LootHunterPreWarnFrame", UIParent, "BackdropTemplate")
 preWarnFrame:SetSize(760, 60)
 preWarnFrame:SetPoint("TOP", UIParent, "TOP", 0, -160)
-preWarnFrame:SetFrameStrata("DIALOG")
+preWarnFrame:SetFrameStrata("FULLSCREEN_DIALOG")
 preWarnFrame:SetBackdrop({
     bgFile = "Interface\\Buttons\\WHITE8X8",
     edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -357,7 +364,7 @@ end
 -- === SISTEMA DE FLASH (Alertas Visuales) ===
 local flashFrame = CreateFrame("Frame", "LootHunterFlash", UIParent)
 flashFrame:SetAllPoints()
-flashFrame:SetFrameStrata("DIALOG")
+flashFrame:SetFrameStrata("FULLSCREEN_DIALOG")
 flashFrame:Hide()
 
 local flashTex = flashFrame:CreateTexture(nil, "BACKGROUND")
@@ -594,6 +601,8 @@ function LootHunter_CreateGUI()
     local SelectTab
 
     mainFrame = CreateFrame("Frame", "LootHunterFrame", UIParent, "BackdropTemplate")
+    mainFrame:SetFrameStrata("DIALOG")
+    mainFrame:SetFrameLevel(10)
     mainFrame:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
     mainFrame:SetBackdropColor(0.11, 0.11, 0.11, 0.95)
     mainFrame:SetBackdropBorderColor(0, 0, 0, 1)
@@ -751,7 +760,6 @@ function LootHunter_CreateGUI()
     typeMenuFrame = CreateFrame("Frame", "LootHunterTypeMenuFrame", UIParent, "BackdropTemplate")
     typeMenuFrame:SetWidth(110)
     typeMenuFrame:SetPoint("TOPLEFT", btnTypeFilter, "BOTTOMLEFT", 0, -2)
-    typeMenuFrame:SetFrameStrata("DIALOG")
     typeMenuFrame:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -760,6 +768,7 @@ function LootHunter_CreateGUI()
     typeMenuFrame:SetBackdropColor(0.12, 0.12, 0.12, 0.95)
     typeMenuFrame:SetBackdropBorderColor(0, 0, 0, 1)
     typeMenuFrame:Hide()
+    ElevateDropdown(typeMenuFrame, btnTypeFilter)
 
     local function CreateTypeMenuButton(parent, text, value, yPos)
         local btn = CreateFrame("Button", nil, parent)
@@ -832,7 +841,6 @@ function LootHunter_CreateGUI()
     sourceMenuFrame = CreateFrame("Frame", "LootHunterSourceMenuFrame", UIParent, "BackdropTemplate")
     sourceMenuFrame:SetWidth(110)
     sourceMenuFrame:SetPoint("TOPLEFT", btnSourceFilter, "BOTTOMLEFT", 0, -2)
-    sourceMenuFrame:SetFrameStrata("DIALOG")
     sourceMenuFrame:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -841,6 +849,7 @@ function LootHunter_CreateGUI()
     sourceMenuFrame:SetBackdropColor(0.12, 0.12, 0.12, 0.95)
     sourceMenuFrame:SetBackdropBorderColor(0, 0, 0, 1)
     sourceMenuFrame:Hide()
+    ElevateDropdown(sourceMenuFrame, btnSourceFilter)
 
     local function CreateSourceMenuButton(parent, text, value, yPos)
         local btn = CreateFrame("Button", nil, parent)
@@ -926,7 +935,6 @@ function LootHunter_CreateGUI()
     specMenuFrame = CreateFrame("Frame", "LootHunterSpecMenuFrame", UIParent, "BackdropTemplate")
     specMenuFrame:SetWidth(110)
     specMenuFrame:SetPoint("TOPLEFT", btnSpecFilter, "BOTTOMLEFT", 0, -2)
-    specMenuFrame:SetFrameStrata("DIALOG")
     specMenuFrame:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -935,6 +943,7 @@ function LootHunter_CreateGUI()
     specMenuFrame:SetBackdropColor(0.12, 0.12, 0.12, 0.95)
     specMenuFrame:SetBackdropBorderColor(0, 0, 0, 1)
     specMenuFrame:Hide()
+    ElevateDropdown(specMenuFrame, btnSpecFilter)
 
     local function CreateSpecMenuButton(parent, text, value, yPos)
         local btn = CreateFrame("Button", nil, parent)
@@ -1165,11 +1174,12 @@ function LootHunter_CreateGUI()
 
     emptyInstruction = emptyContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     emptyInstruction:SetPoint("TOP", emptyQuote, "BOTTOM", 0, -25)
-    emptyInstruction:SetPoint("LEFT", emptyContainer, "LEFT", 4, 0)
-    emptyInstruction:SetPoint("RIGHT", emptyContainer, "RIGHT", -4, 0)
+    -- Dar un poco más de ancho al texto para que envuelva menos temprano
+    emptyInstruction:SetPoint("LEFT", emptyContainer, "LEFT", -20, 0)
+    emptyInstruction:SetPoint("RIGHT", emptyContainer, "RIGHT", 20, 0)
     emptyInstruction:SetJustifyH("CENTER")
     if emptyInstruction.SetSpacing then
-        emptyInstruction:SetSpacing(2)
+        emptyInstruction:SetSpacing(3)
     end
     emptyInstruction:SetText(L["EMPTY_CTA_INSTRUCTION"])
     ApplyAccentFont(emptyInstruction)
@@ -1879,10 +1889,17 @@ function LootHunter_CreateGUI()
     end
     addonTable.SelectTab(1)
 
+    local function GetAddonVersion()
+        if addonTable and addonTable.version then
+            return addonTable.version
+        end
+        local meta = GetAddOnMetadata and GetAddOnMetadata(addonName, "Version")
+        return meta or "dev"
+    end
     local versionLabel = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     versionLabel:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -10, 5)
     versionLabel:SetTextColor(0.35, 0.35, 0.35)
-    versionLabel:SetText("v.1.5-test     ")
+    versionLabel:SetText("v." .. tostring(GetAddonVersion()) .. "     ")
     addonTable.SwitchToList = function()
         if addonTable.SelectTab then addonTable.SelectTab(1) end
     end

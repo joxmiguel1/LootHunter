@@ -2,10 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.5.2-test
+- Added configurable coin reminder wait (30s-150s slider, default 150s) and debug logs showing the chosen value when timers start.
+- Hooked Group Loot need/greed (`START_LOOT_ROLL`) to fire DROP alerts in dungeons; registered the event and improved logs with item ID + name.
+- Drop prompt line now only appears in raids; dungeon drops show the header/item without dice prompt.
+- Styled the coin delay slider (subtitle/primary-light-gray ticks) and hardened settings text widgets (safe SetNonSpaceWrap/SetSpacing calls).
+- DROP alert logs now include item names for easier debugging.
+- Removed the experimental vendor search feature and its settings tab (was off by default).
+- Vendor items that are already on your list now show a subtle green name tint in merchant windows.
+- Vendor tooltips for tracked items now include a green Loot Hunter header and localized “already on your list” line.
+- Fixed Spanish localization encoding (all accented characters render correctly again) and added a tip about adding vendor items via Shift+Click.
+
 ## 1.5.1-test
 - Added debug slash commands: `/lh_boss`, `/lh_drop`, `/lh_won`.
 - Added pre-warning shake animation and other-won fade (testable in preview and live).
 - Added colored chat formatting for DROP and other-won messages.
+- Raised UI frame strata so Loot Hunter stays above other addons.
 - Added boss-no-items chat option under Loot Alerts > Miscellaneous.
 - Improved coin reminder flow: drop blocks reminders; no-drop triggers after 30s.
 - Added chat output for pre-warning and coin reminder alerts.

@@ -413,7 +413,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
                 desc:SetNonSpaceWrap(true)
             end
             if desc.SetSpacing then
-                desc:SetSpacing(2)
+                pcall(desc.SetSpacing, desc, 2)
             end
             desc:SetText(description)
             desc:SetTextColor(0.8, 0.8, 0.8)
@@ -498,7 +498,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
                 desc:SetNonSpaceWrap(true)
             end
             if desc.SetSpacing then
-                desc:SetSpacing(2)
+                pcall(desc.SetSpacing, desc, 2)
             end
             desc:SetText(description)
             desc:SetTextColor(0.8, 0.8, 0.8)
@@ -520,7 +520,10 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         })
         menuFrame:SetBackdropColor(0.15, 0.15, 0.15, 0.95)
         menuFrame:SetBackdropBorderColor(0, 0, 0, 1)
-        menuFrame:SetFrameStrata("DIALOG")
+        menuFrame:SetFrameStrata("TOOLTIP")
+        local baseLevel = (dropdown.GetFrameLevel and dropdown:GetFrameLevel()) or 0
+        menuFrame:SetFrameLevel(baseLevel + 50)
+        menuFrame:SetClampedToScreen(true)
         menuFrame:Hide()
 
         local function UpdateDropdownText()
@@ -595,6 +598,127 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         ReflowPanel(panel)
 
         return dropdown, entryFrame, entry
+    end
+    
+    local function FormatSecondsText(value)
+        local v = math.floor(tonumber(value) or 0)
+        if v < 0 then v = 0 end
+        local m = math.floor(v / 60)
+        local s = v % 60
+        if m > 0 then
+            return string.format("%dm %02ds", m, s)
+        end
+        return string.format("%ds", s)
+    end
+
+    function Settings:CreateSlider(panel, key, labelText, minValue, maxValue, step, description)
+        local entryFrame = CreateFrame("Frame", nil, panel)
+        entryFrame:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+        entryFrame:SetPoint("RIGHT", panel, "RIGHT", 0, 0)
+
+        local label = entryFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        label:SetPoint("TOPLEFT", entryFrame, "TOPLEFT", 20, 0)
+        label:SetPoint("RIGHT", entryFrame, "RIGHT", -10, 0)
+        label:SetJustifyH("LEFT")
+        label:SetWordWrap(true)
+        label:SetMaxLines(2)
+        if label.SetNonSpaceWrap then
+            pcall(label.SetNonSpaceWrap, label, true)
+        end
+        label:SetText(labelText or key)
+        do
+            local pr, pg, pb = GetPrimaryColor()
+            label:SetTextColor((pr + 1) * 0.5, (pg + 1) * 0.5, (pb + 1) * 0.5) -- Subtitle color: primary mixed 50% with white
+        end
+
+        local slider = CreateFrame("Slider", "LootHunter_SettingsSlider_"..key:gsub("%.", "_"), entryFrame, "OptionsSliderTemplate")
+        slider:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -8)
+        slider:SetPoint("RIGHT", entryFrame, "RIGHT", -60, 0)
+        slider:SetMinMaxValues(minValue or 0, maxValue or 100)
+        slider:SetValueStep(step or 1)
+        slider:SetObeyStepOnDrag(true)
+
+        local valueText = entryFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        valueText:SetPoint("LEFT", slider, "RIGHT", 8, 0)
+        valueText:SetJustifyH("LEFT")
+        do
+            local pr, pg, pb = GetPrimaryColor()
+            valueText:SetTextColor(pr, pg, pb) -- Primary color for live value
+        end
+
+        local low = slider.Low or _G[slider:GetName() .. "Low"]
+        local high = slider.High or _G[slider:GetName() .. "High"]
+        if low then
+            low:SetText(FormatSecondsText(minValue or 0))
+            low:SetTextColor(0.75, 0.75, 0.75) -- Light gray min label
+        end
+        if high then
+            high:SetText(FormatSecondsText(maxValue or 0))
+            high:SetTextColor(0.75, 0.75, 0.75) -- Light gray max label
+        end
+        if slider.Text then slider.Text:Hide() end
+
+        local desc
+        if description then
+            desc = entryFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+            desc:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -8)
+            desc:SetPoint("RIGHT", entryFrame, "RIGHT", -10, 0)
+            desc:SetJustifyH("LEFT")
+            desc:SetWordWrap(true)
+            desc:SetMaxLines(5)
+            if desc.SetNonSpaceWrap then
+                pcall(desc.SetNonSpaceWrap, desc, true)
+            end
+            if desc.SetSpacing then
+                pcall(desc.SetSpacing, desc, 2)
+            end
+            desc:SetText(description)
+            desc:SetTextColor(0.8, 0.8, 0.8)
+        end
+
+        local db_category, db_key = string.match(key, "([^.]+)%.([^.]+)")
+        local current = maxValue or 0
+        if addonTable.db and addonTable.db.settings[db_category] and addonTable.db.settings[db_category][db_key] ~= nil then
+            current = addonTable.db.settings[db_category][db_key]
+        end
+        current = tonumber(current) or current or (maxValue or 0)
+        local minV = minValue or 0
+        local maxV = maxValue or 0
+        if current < minV then current = minV end
+        if current > maxV then current = maxV end
+        local isInternalSet = true
+        slider:SetValue(current)
+        isInternalSet = false
+        valueText:SetText(FormatSecondsText(current))
+
+        slider:SetScript("OnValueChanged", function(self, val)
+            if isInternalSet then return end
+            local st = step or 1
+            local rounded = math.floor((val / st) + 0.5) * st
+            if rounded < minV then rounded = minV end
+            if rounded > maxV then rounded = maxV end
+            if rounded ~= val then
+                isInternalSet = true
+                self:SetValue(rounded)
+                isInternalSet = false
+            end
+            valueText:SetText(FormatSecondsText(rounded))
+            if addonTable.db and addonTable.db.settings[db_category] then
+                addonTable.db.settings[db_category][db_key] = rounded
+            end
+        end)
+
+        table.insert(panel._layout, {
+            frame = entryFrame,
+            label = label,
+            desc = desc,
+            afterSpacing = panel._entryAfterSpacing,
+            compact = panel._compactEntries,
+            extraHeight = (slider:GetHeight() or 18) + 14,
+        })
+        ReflowPanel(panel)
+
+        return slider, desc, entryFrame
     end
         
     -- Ayudas de vista previa para opciones de recordatorio de moneda
@@ -709,6 +833,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     Settings:CreateCheckbox(coinPanel, "coinReminder.preWarning", L["SETTING_COIN_PREWARN_LABEL"], L["SETTING_COIN_PREWARN_DESC"], nil, PreviewCoinPreWarn)
     Settings:CreateCheckbox(coinPanel, "coinReminder.visualAlert", L["SETTING_COIN_VISUAL_LABEL"], L["SETTING_COIN_VISUAL_DESC"], nil, PreviewCoinVisual)
     local _, _, lastCoinEntry = Settings:CreateCheckbox(coinPanel, "coinReminder.soundEnabled", L["SETTING_COIN_SOUND_LABEL"], L["SETTING_COIN_SOUND_DESC"], nil, PreviewCoinSound)
+    Settings:CreateSlider(coinPanel, "coinReminder.reminderDelay", L["SETTING_COIN_DELAY_LABEL"], 30, 150, 5, L["SETTING_COIN_DELAY_DESC"])
 
 
     local alertsPanel = Settings:CreateCategory("LootAlerts", L["LOOT_ALERTS_SETTINGS"])

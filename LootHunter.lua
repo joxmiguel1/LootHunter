@@ -4,6 +4,7 @@
 local addonName, addonTable = ...
 local L = addonTable.L
 local CreateGradient = addonTable.CreateGradient or function(text) return text end
+local ColorPrimary = addonTable.ColorPrimary
 local frame = CreateFrame("Frame")
 addonTable.isRefreshing = false
 local BuildStaticDB
@@ -260,6 +261,8 @@ local PendingCoinReminders = {}
 local LastCoinReminderBoss = nil
 local TriggerLootReadyTimers
 local COIN_REMINDER_DELAY = 4
+local COIN_REMINDER_MIN_WAIT = 30
+local COIN_REMINDER_MAX_WAIT = 150
 local COIN_REMINDER_FALLBACK = 40
 local PREWARN_SOUND_ID = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081
 local COIN_LOST_SOUND_ID = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081
@@ -269,8 +272,6 @@ local lastAnnouncedRollItemID = nil
 local lastAnnouncedRollTime = nil
 local lastPlayerRollItemID = nil
 local lastPlayerRollTime = nil
-local lastShiftDoubleClickLink = nil
-local lastShiftDoubleClickTime = nil
 local ALERT_DEFAULT_DURATION = 6.8
 local ALERT_PRIORITY_PRIMARY = 1
 local ALERT_PRIORITY_SECONDARY = 2
@@ -286,6 +287,18 @@ local function LogAlertDebug(msg)
     if addonTable and addonTable.LogDebug then
         addonTable.LogDebug("|cff00ff00[Alert]|r " .. msg)
     end
+end
+local function GetCoinReminderWait()
+    local value = COIN_REMINDER_MAX_WAIT
+    if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder then
+        local saved = tonumber(LootHunterDB.settings.coinReminder.reminderDelay)
+        if saved then
+            value = saved
+        end
+        value = math.max(COIN_REMINDER_MIN_WAIT, math.min(COIN_REMINDER_MAX_WAIT, value))
+        LootHunterDB.settings.coinReminder.reminderDelay = value
+    end
+    return value
 end
 -- TABLA DE CATEGORÍAS
 local SLOT_INFO = {}
@@ -334,6 +347,7 @@ local function InitializeSettings()
             visualAlert = true,
             soundEnabled = true,
             soundFile = 12867, -- ID de sonido por defecto del codigo original
+            reminderDelay = COIN_REMINDER_MAX_WAIT,
         },
         lootAlerts = {
             itemWon = true,
@@ -432,40 +446,20 @@ local function HandleAddonLoaded(event, arg1)
     BuildStaticDB()
 
     hooksecurefunc("HandleModifiedItemClick", function(itemLink)
-        if IsShiftKeyDown() and not addonTable.SuppressAddItem then
-            if addonTable.MainFrame and addonTable.MainFrame:IsShown() and itemLink then
-                local now = GetTime()
-                if lastShiftDoubleClickLink == itemLink
-                    and lastShiftDoubleClickTime
-                    and (now - lastShiftDoubleClickTime) <= 0.4
-                    and not ChatEdit_GetActiveWindow() then
-                    local safeLink = itemLink
-                    C_Timer.After(0, function()
-                        if addonTable.SuppressAddItem then return end
-                        if addonTable.MainFrame and addonTable.MainFrame:IsShown() then
-                            AddItemToList(safeLink)
-                        end
-                    end)
-                    lastShiftDoubleClickLink = nil
-                    lastShiftDoubleClickTime = nil
-                    return
-                end
-                lastShiftDoubleClickLink = itemLink
-                lastShiftDoubleClickTime = now
-                if not (EncounterJournal and EncounterJournal:IsShown()) then
-                    return -- Solo permitir Shift+Click cuando el Encounter Journal está abierto (evita agregar desde chat)
-                end
-                local safeLink = itemLink
-                C_Timer.After(0, function()
-                    if addonTable.SuppressAddItem then return end
-                    if addonTable.MainFrame and addonTable.MainFrame:IsShown() then
-                        AddItemToList(safeLink)
-                    end
-                end)
-            end
+        if not IsShiftKeyDown() or addonTable.SuppressAddItem then return end
+        if not (addonTable.MainFrame and addonTable.MainFrame:IsShown()) then return end
+        if not itemLink or ChatEdit_GetActiveWindow() then return end
+        local safeLink = itemLink
+    C_Timer.After(0, function()
+        if addonTable.SuppressAddItem then return end
+        if addonTable.MainFrame and addonTable.MainFrame:IsShown() then
+            AddItemToList(safeLink)
         end
     end)
+end)
+
 end
+
 ValidateAddonAssets = function()
     if type(L) ~= "table" then return end
     local missing = {}
@@ -976,8 +970,9 @@ local function StartTwoStageCoinReminder(key)
         LogCoinDebug(string.format("Two-stage reminder for %s blocked because drop was seen.", entry.boss or "Unknown"))
         return
     end
-    if entry.deathTime and (GetTime() - entry.deathTime) < 30 then
-        LogCoinDebug(string.format("Two-stage reminder for %s delayed until 30s after boss death.", entry.boss or "Unknown"))
+    local waitWindow = GetCoinReminderWait()
+    if entry.deathTime and (GetTime() - entry.deathTime) < waitWindow then
+        LogCoinDebug(string.format("Two-stage reminder for %s delayed until %.0fs after boss death.", entry.boss or "Unknown", waitWindow))
         return
     end
     if entry.deferStartUntil and GetTime() < entry.deferStartUntil then
@@ -986,7 +981,7 @@ local function StartTwoStageCoinReminder(key)
     end
     entry.timerStarted = true
     entry.isTwoStage = true -- Marca para permitir interrupción si cae loot
-    LogCoinDebug(string.format("Starting 2-stage timer for %s (10s pre-warn + 35s final)", entry.boss or "Unknown"))
+    LogCoinDebug(string.format("Starting 2-stage timer for %s (wait %.0fs then 10s pre-warn + 35s final)", entry.boss or "Unknown", waitWindow))
     if entry.skipPrewarn then
         C_Timer.After(35, function()
             if PendingCoinReminders[key] then
@@ -1025,13 +1020,14 @@ end
 local function ActivatePendingForBonusRoll(reason)
     for key, entry in pairs(PendingCoinReminders) do
         if entry and not entry.timerStarted then
+            local waitWindow = GetCoinReminderWait()
             if entry.dropSeen then
                 LogCoinDebug(string.format("Bonus roll activation ignored for %s because drop was seen.", entry.boss or "Unknown"))
-            elseif entry.deathTime and (GetTime() - entry.deathTime) >= 30 then
+            elseif entry.deathTime and (GetTime() - entry.deathTime) >= waitWindow then
                 LogCoinDebug(string.format("Bonus roll activation triggering reminder for %s.", entry.boss or "Unknown"))
                 StartCoinReminderTimer(key, "bonus_roll_activate", 0)
             else
-                LogCoinDebug(string.format("Bonus roll activation deferred for %s (waiting 30s no-drop window).", entry.boss or "Unknown"))
+                LogCoinDebug(string.format("Bonus roll activation deferred for %s (waiting %.0fs no-drop window).", entry.boss or "Unknown", waitWindow))
             end
         end
     end
@@ -1106,18 +1102,22 @@ local function ShowDropAlert(itemID, itemData)
     local dropTitle = CreateGradient(L["DROP_ALERT_TITLE"], 1, 0.7, 0.2, 1, 0.45, 0)
     local dropHeader = string.format("%s %s %s", ICON_DIAMOND, dropTitle, ICON_DIAMOND)
     local dropItemLine = string.format("%s!", itemData.link or itemData.name or tostring(itemID))
-    local dropPrompt = CreateGradient(L["DROP_ALERT_PROMPT"], 1, 0.85, 0.35, 1, 0.75, 0)
+    local _, instanceType = IsInInstance()
+    local showPrompt = (instanceType == "raid")
+    local dropPrompt = showPrompt and CreateGradient(L["DROP_ALERT_PROMPT"], 1, 0.85, 0.35, 1, 0.75, 0) or nil
+    local alertText = dropHeader .. "\n" .. dropItemLine .. (dropPrompt and ("\n" .. dropPrompt) or "")
     EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_PRIMARY, function()
         if addonTable.FlashScreen then addonTable.FlashScreen("ORANGE") end
         if addonTable.ShowAlert then
-            addonTable.ShowAlert(string.format("%s\n%s\n%s", dropHeader, dropItemLine, dropPrompt), 1, 0.55, 0.05)
+            addonTable.ShowAlert(alertText, 1, 0.55, 0.05)
         end
         PlaySound(12867)
     end)
     if L["DROP_CHAT_MSG"] then
         print(string.format(L["DROP_CHAT_MSG"], itemData.link or itemData.name or tostring(itemID)))
     end
-    LogAlertDebug("DROP alert shown for item " .. tostring(itemID))
+    local displayName = itemData.link or itemData.name or tostring(itemID)
+    LogAlertDebug(string.format("DROP alert shown for item %s (%s)", tostring(itemID), displayName))
 end
 -- Buffs de moneda MoP: Seal of Power (LFR), Seal of Fate (Normal)
 local bonusSpellIDs = {126938, 128362}
@@ -1156,6 +1156,8 @@ local function ScheduleCoinReminder(encounterID, bossName, forceRaid, forcePreWa
     local _, instanceType = IsInInstance()
     LastCoinReminderBoss = bossName
     local instanceName = (GetInstanceInfo and select(1, GetInstanceInfo())) or nil
+    local reminderDelay = GetCoinReminderWait()
+    LogCoinDebug(string.format("User-configured coin wait set to %.0fs for %s", reminderDelay, bossName))
     local pendingItems = {}
     for id, data in pairs(CurrentCharDB) do
         if type(id) == "number" and type(data) == "table" and data.status == 0 then
@@ -1246,7 +1248,8 @@ local function ScheduleCoinReminder(encounterID, bossName, forceRaid, forcePreWa
         table.insert(itemNames, data and (data.name or tostring(pendingID)) or tostring(pendingID))
     end
     LogCoinDebug(string.format("Scheduled coin reminder for %s with %d pending items: %s", bossName, #pendingItems, table.concat(itemNames, ", ")))
-    C_Timer.After(30, function()
+    LogCoinDebug(string.format("Scheduling no-drop timer for %s with wait %.0fs (user value).", bossName, reminderDelay))
+    C_Timer.After(reminderDelay, function()
         local entry = PendingCoinReminders[key]
         if not entry then return end
         if entry.dropSeen then
@@ -1257,7 +1260,7 @@ local function ScheduleCoinReminder(encounterID, bossName, forceRaid, forcePreWa
             LogCoinDebug(string.format("No-drop timer for %s fired but Bonus Roll window is not visible, skipping reminder.", entry.boss or "Unknown"))
             return
         end
-        LogCoinDebug(string.format("No-drop timer expired for %s. Triggering reminder.", entry.boss or "Unknown"))
+        LogCoinDebug(string.format("No-drop timer (%.0fs) expired for %s. Triggering reminder.", reminderDelay, entry.boss or "Unknown"))
         StartCoinReminderTimer(key, "no_drop", 0)
     end)
 end
@@ -1622,6 +1625,90 @@ local function HandleChatLinkAnnounce(event, msg, sender, ...)
         end
     end
 end
+-- Detecta inicio de tirada Need/Greed (Group Loot en mazmorras)
+local function HandleStartLootRoll(event, rollID, rollTime)
+    if not rollID or not GetLootRollItemLink then return end
+    local link = GetLootRollItemLink(rollID)
+    if not link or not CurrentCharDB then return end
+    local id = tonumber(string.match(link, "item:(%d+):"))
+    if not id or not CurrentCharDB[id] or CurrentCharDB[id].status ~= 0 then return end
+    local itemData = CurrentCharDB[id]
+    local itemName = (itemData and itemData.name) or link or ("item:" .. tostring(id))
+    LogAlertDebug(string.format("START_LOOT_ROLL detected for pending item %d (%s)", id, itemName))
+    ShowDropAlert(id, itemData)
+    LootHunter_RefreshUI()
+end
+
+-- Resalta en verde discreto los objetos del vendedor que ya estA!n en la lista
+local trackedVendorColor = { 0.55, 1.0, 0.65 }
+local merchantHooked = false
+local merchantTooltipHooked = false
+
+local function AddTrackedInfoToMerchantTooltip(button)
+    if not button or not CurrentCharDB or not GetMerchantItemLink then return end
+    local perPage = _G.MERCHANT_ITEMS_PER_PAGE or 10
+    local page = MerchantFrame and (MerchantFrame.page or 1) or 1
+    local idx = ((page - 1) * perPage) + (button:GetID() or 0)
+    local link = GetMerchantItemLink(idx)
+    local itemID = link and tonumber(link:match("item:(%d+):"))
+    if not (itemID and CurrentCharDB[itemID] and GameTooltip) then return end
+    -- Cabecera en color primario + lAnea informativa en verde
+    -- Usar el verde habitual de las notificaciones
+    local header = "|cff00ff00[Loot Hunter]|r"
+    GameTooltip:AddLine(header)
+    GameTooltip:AddLine(L["VENDOR_TRACKED_TOOLTIP"], trackedVendorColor[1], trackedVendorColor[2], trackedVendorColor[3])
+    GameTooltip:Show()
+end
+
+local function HighlightTrackedMerchantItems()
+    if not MerchantFrame or not MerchantFrame:IsShown() or not GetMerchantNumItems then return end
+    if not CurrentCharDB then return end
+    local perPage = _G.MERCHANT_ITEMS_PER_PAGE or 10
+    local page = MerchantFrame.page or 1
+    local offset = (page - 1) * perPage
+    for i = 1, perPage do
+        local nameText = _G["MerchantItem" .. i .. "Name"]
+        if nameText then
+            -- Guarda el color original una sola vez para restaurarlo en items no rastreados
+            if not nameText._lh_origColor then
+                local r0, g0, b0 = nameText:GetTextColor()
+                nameText._lh_origColor = { r0 or 1, g0 or 1, b0 or 1 }
+            end
+            local idx = offset + i
+            local link = GetMerchantItemLink and GetMerchantItemLink(idx)
+            local itemID = link and tonumber(link:match("item:(%d+):"))
+            if itemID and CurrentCharDB and CurrentCharDB[itemID] then
+                nameText:SetTextColor(trackedVendorColor[1], trackedVendorColor[2], trackedVendorColor[3])
+            else
+                local orig = nameText._lh_origColor
+                nameText:SetTextColor(orig[1], orig[2], orig[3])
+            end
+        end
+    end
+end
+local function HookMerchantHighlight()
+    if merchantHooked or not MerchantFrame_UpdateMerchantInfo then return end
+    merchantHooked = true
+    local originalMerchantUpdate = MerchantFrame_UpdateMerchantInfo
+    MerchantFrame_UpdateMerchantInfo = function(...)
+        local res = originalMerchantUpdate(...)
+        HighlightTrackedMerchantItems()
+        return res
+    end
+    if not merchantTooltipHooked and hooksecurefunc and GameTooltip and GameTooltip.HookScript then
+        merchantTooltipHooked = true
+        GameTooltip:HookScript("OnTooltipSetItem", function(tip)
+            local owner = tip:GetOwner()
+            if owner and owner:GetName() and owner:GetName():match("^MerchantItem") then
+                AddTrackedInfoToMerchantTooltip(owner)
+            end
+        end)
+    end
+end
+local function HandleMerchantEvent()
+    HookMerchantHighlight()
+    HighlightTrackedMerchantItems()
+end
 local eventHandlers = {
     ADDON_LOADED = HandleAddonLoaded,
     GET_ITEM_INFO_RECEIVED = HandleInfoUpdate,
@@ -1639,9 +1726,12 @@ local eventHandlers = {
     CHAT_MSG_RAID_WARNING = HandleChatLinkAnnounce,
     CHAT_MSG_PARTY = HandleChatLinkAnnounce,
     CHAT_MSG_PARTY_LEADER = HandleChatLinkAnnounce,
+    START_LOOT_ROLL = HandleStartLootRoll,
     PLAYER_SPECIALIZATION_CHANGED = HandleSpecChange,
     ACTIVE_TALENT_GROUP_CHANGED = HandleSpecChange,
     PLAYER_TALENT_UPDATE = HandleSpecChange,
+    MERCHANT_SHOW = HandleMerchantEvent,
+    MERCHANT_UPDATE = HandleMerchantEvent,
 }
 frame:SetScript("OnEvent", function(self, event, arg1, ...)
     if eventHandlers[event] then
@@ -1664,9 +1754,12 @@ frame:RegisterEvent("CHAT_MSG_RAID_LEADER")
 frame:RegisterEvent("CHAT_MSG_RAID_WARNING")
 frame:RegisterEvent("CHAT_MSG_PARTY")
 frame:RegisterEvent("CHAT_MSG_PARTY_LEADER")
+frame:RegisterEvent("START_LOOT_ROLL")
 frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 frame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 frame:RegisterEvent("PLAYER_TALENT_UPDATE")
+frame:RegisterEvent("MERCHANT_SHOW")
+frame:RegisterEvent("MERCHANT_UPDATE")
  -- === SISTEMA DE LOGGING ===
  local DebugLog = {}
  local function IsDebugEnabled()
@@ -2064,6 +2157,9 @@ function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
         end
         print(string.format(L["ADDED_MSG"], id, displayName))
         LootHunter_RefreshUI()
+        if MerchantFrame and MerchantFrame:IsShown() then
+            HighlightTrackedMerchantItems()
+        end
         MaybeRefreshJournalBoss(id)
     else
         if bisType then CurrentCharDB[id].bisType = bisType end
@@ -2085,6 +2181,9 @@ function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
             CurrentCharDB[id].boss = source
         end
         LootHunter_RefreshUI()
+        if MerchantFrame and MerchantFrame:IsShown() then
+            HighlightTrackedMerchantItems()
+        end
     end
     if CurrentCharDB[id] and (not CurrentCharDB[id].boss or CurrentCharDB[id].boss == L["UNKNOWN_SOURCE"]) then
         TryResolveSourceAsync(id)
@@ -2196,3 +2295,4 @@ SlashCmdList["LOOTHUNTER_WON"] = function(msg)
         end
     end
 end
+
