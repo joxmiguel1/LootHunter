@@ -9,10 +9,33 @@ local frame = CreateFrame("Frame")
 addonTable.isRefreshing = false
 local BuildStaticDB
 local ResolveAllUnknownSources
-local LogCoinDebug
+local LogCoinDebug = addonTable.LogCoinDebug or function() end
+local LogDebug = addonTable.LogDebug or function() end
 local GetCurrentSpecName
 local MOPTierSelected = false
 local ShowDropAlert
+local SetupHeroicQueueConfirm
+local EnsureHeroicQueuePopup
+local ScheduleHeroicQueueCheck
+local lastHeroicPrompt = 0
+local heroPopupShown = false
+local function SafeLeaveLFG()
+    if LeaveLFG then
+        local ok = pcall(LeaveLFG, _G.LE_LFG_CATEGORY_LFD or 1)
+        if ok then return end
+    end
+    if LFGLeave then
+        pcall(LFGLeave)
+    end
+end
+local function HeroicLog(msg)
+    if not LogDebug then return end
+    local t = GetTime and GetTime() or 0
+    LogDebug(string.format("[HeroicQueue][%0.2f] %s", t, msg))
+end
+local lastRandomDungeonID = nil -- solo para logs
+local currentRandomDungeonID = nil -- selección actual del dropdown/random
+local currentRandomDungeonName = nil -- texto visible del dropdown
 local function RequestItemData(itemID)
     if C_Item and C_Item.RequestLoadItemDataByID then
         C_Item.RequestLoadItemDataByID(itemID)
@@ -257,6 +280,9 @@ local function GetSpecNameFromID(specID)
 end
 -- Control de alertas de drop para evitar spam
 local LastDropAlert = {}
+local dropBatchStart = 0
+local dropBatchCount = 0
+local suppressOtherWonUntil = 0
 local PendingCoinReminders = {}
 local LastCoinReminderBoss = nil
 local TriggerLootReadyTimers
@@ -268,6 +294,7 @@ local PREWARN_SOUND_ID = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081
 local COIN_LOST_SOUND_ID = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081
 local OTHER_WON_SOUND = "Sound\\Creature\\ArthasPrisoner\\UR_ArthasPrisoner_YSVisThree01.ogg"
 local ROLL_TRACK_WINDOW = 35
+local MULTI_DROP_SUPPRESS_WINDOW = 60
 local lastAnnouncedRollItemID = nil
 local lastAnnouncedRollTime = nil
 local lastPlayerRollItemID = nil
@@ -355,6 +382,9 @@ local function InitializeSettings()
             otherWonSound = true,
             bossNoItems = false,
         },
+        misc = {
+            heroicQueueConfirm = true,
+        },
         general = {
             windowsLocked = true,
             debugLogging = false,
@@ -399,6 +429,10 @@ local function HandleAddonLoaded(event, arg1)
         end
         return
     end
+    if arg1 == "Blizzard_LFDUI" then
+        SetupHeroicQueueConfirm()
+        return
+    end
     if arg1 ~= addonName then return end
     addonTable.version = GetAddOnMetadata(addonName, "Version") or "1.0"
 
@@ -417,7 +451,7 @@ local function HandleAddonLoaded(event, arg1)
     if not LootHunterDB.windowSettings then
         local screenWidth = (GetScreenWidth and GetScreenWidth()) or (UIParent and UIParent:GetWidth()) or 0
         local defaultX = -math.floor((screenWidth or 0) * 0.10)
-        LootHunterDB.windowSettings = { point = "RIGHT", relativePoint = "RIGHT", x = defaultX, y = 0, width = 510, height = 463 }
+        LootHunterDB.windowSettings = { point = "RIGHT", relativePoint = "RIGHT", x = defaultX, y = 0, width = 530, height = 463 }
     end
     if not LootHunterDB.buttonPos then
         LootHunterDB.buttonPos = { point = "CENTER", x = -200, y = 0 }
@@ -444,6 +478,7 @@ local function HandleAddonLoaded(event, arg1)
     end
     -- CreateFloatingButton() -- Reemplazado por el icono del minimapa
     BuildStaticDB()
+    SetupHeroicQueueConfirm()
 
     hooksecurefunc("HandleModifiedItemClick", function(itemLink)
         if not IsShiftKeyDown() or addonTable.SuppressAddItem then return end
@@ -1099,10 +1134,21 @@ local function ShowDropAlert(itemID, itemData)
         return
     end
     LastDropAlert[itemID] = now
+    -- Detect batch of multiple tracked drops close in time to suppress other-won spam
+    if (now - (dropBatchStart or 0)) > 10 then
+        dropBatchStart = now
+        dropBatchCount = 0
+    end
+    dropBatchCount = (dropBatchCount or 0) + 1
+    if dropBatchCount >= 2 then
+        suppressOtherWonUntil = math.max(suppressOtherWonUntil or 0, now + MULTI_DROP_SUPPRESS_WINDOW)
+        LogAlertDebug(string.format("Multiple drops detected (%d in batch); suppressing other-won for %.1fs", dropBatchCount, suppressOtherWonUntil - now))
+    end
     local dropTitle = CreateGradient(L["DROP_ALERT_TITLE"], 1, 0.7, 0.2, 1, 0.45, 0)
     local dropHeader = string.format("%s %s %s", ICON_DIAMOND, dropTitle, ICON_DIAMOND)
     local dropItemLine = string.format("%s!", itemData.link or itemData.name or tostring(itemID))
     local _, instanceType = IsInInstance()
+    -- Only show the roll reminder prompt in raids (no /roll flow in dungeons).
     local showPrompt = (instanceType == "raid")
     local dropPrompt = showPrompt and CreateGradient(L["DROP_ALERT_PROMPT"], 1, 0.85, 0.35, 1, 0.75, 0) or nil
     local alertText = dropHeader .. "\n" .. dropItemLine .. (dropPrompt and ("\n" .. dropPrompt) or "")
@@ -1111,7 +1157,9 @@ local function ShowDropAlert(itemID, itemData)
         if addonTable.ShowAlert then
             addonTable.ShowAlert(alertText, 1, 0.55, 0.05)
         end
-        PlaySound(12867)
+        if not PlaySound(12867, "Master") then
+            PlaySound(12867)
+        end
     end)
     if L["DROP_CHAT_MSG"] then
         print(string.format(L["DROP_CHAT_MSG"], itemData.link or itemData.name or tostring(itemID)))
@@ -1372,6 +1420,11 @@ local function IsPlayerRollMessage(msg)
     return false
 end
 local function ShouldTriggerOtherWon(itemID)
+    local now = GetTime and GetTime() or 0
+    if suppressOtherWonUntil and now < suppressOtherWonUntil then
+        LogAlertDebug(string.format("Suppressing other-won for item %s (multi-drop active, %.1fs remaining)", tostring(itemID), suppressOtherWonUntil - now))
+        return false
+    end
     if not lastPlayerRollItemID or lastPlayerRollItemID ~= itemID then return false end
     if not lastPlayerRollTime then return false end
     if not lastAnnouncedRollItemID or lastAnnouncedRollItemID ~= itemID then return false end
@@ -1528,7 +1581,8 @@ local function PlayOtherWonSound(force)
     if GetCVar and SetCVar then
         originalVolume = tonumber(GetCVar(volumeCVar) or 1)
         if originalVolume then
-            local target = math.max(0, math.min(originalVolume * 0.5, 1))
+            -- Lower SFX volume by 10% while the lament plays, then restore.
+            local target = math.max(0, math.min(originalVolume * 0.9, 1))
             if target ~= originalVolume then
                 SetCVar(volumeCVar, target)
                 C_Timer.After(1, function()
@@ -1639,25 +1693,68 @@ local function HandleStartLootRoll(event, rollID, rollTime)
     LootHunter_RefreshUI()
 end
 
--- Resalta en verde discreto los objetos del vendedor que ya estA!n en la lista
+-- Resalta en verde los objetos del vendedor según estado (lista o equipado)
 local trackedVendorColor = { 0.55, 1.0, 0.65 }
+local equippedVendorColor = { 0.2, 1.0, 0.2 }
 local merchantHooked = false
 local merchantTooltipHooked = false
 
-local function AddTrackedInfoToMerchantTooltip(button)
-    if not button or not CurrentCharDB or not GetMerchantItemLink then return end
-    local perPage = _G.MERCHANT_ITEMS_PER_PAGE or 10
-    local page = MerchantFrame and (MerchantFrame.page or 1) or 1
-    local idx = ((page - 1) * perPage) + (button:GetID() or 0)
-    local link = GetMerchantItemLink(idx)
+local function IsItemEquipped(itemID)
+    if not itemID then return false end
+    if IsEquippableItem then
+        local ok, equippable = pcall(IsEquippableItem, itemID)
+        if ok and equippable == false then
+            return false
+        end
+    end
+    if IsEquippedItem then
+        local ok, equipped = pcall(IsEquippedItem, itemID)
+        if ok and equipped then
+            return true
+        end
+    end
+    if not GetInventoryItemID then return false end
+    for slot = 1, 19 do
+        local equippedID = GetInventoryItemID("player", slot)
+        if equippedID == itemID then
+            return true
+        end
+    end
+    return false
+end
+
+local function AddTrackedInfoToMerchantTooltip(target)
+    if not GetMerchantItemLink or not GameTooltip then return end
+    local slotIndex = nil
+    if type(target) == "number" then
+        slotIndex = target
+    elseif target and target.GetID then
+        local perPage = _G.MERCHANT_ITEMS_PER_PAGE or 10
+        local page = MerchantFrame and (MerchantFrame.page or 1) or 1
+        slotIndex = ((page - 1) * perPage) + (target:GetID() or 0)
+    end
+    if not slotIndex or slotIndex <= 0 then return end
+
+    local link = GetMerchantItemLink(slotIndex)
     local itemID = link and tonumber(link:match("item:(%d+):"))
-    if not (itemID and CurrentCharDB[itemID] and GameTooltip) then return end
-    -- Cabecera en color primario + lAnea informativa en verde
-    -- Usar el verde habitual de las notificaciones
-    local header = "|cff00ff00[Loot Hunter]|r"
-    GameTooltip:AddLine(header)
-    GameTooltip:AddLine(L["VENDOR_TRACKED_TOOLTIP"], trackedVendorColor[1], trackedVendorColor[2], trackedVendorColor[3])
-    GameTooltip:Show()
+    if not itemID then return end
+
+    local isTracked = CurrentCharDB and CurrentCharDB[itemID]
+    local isEquipped = IsItemEquipped(itemID)
+
+    if isTracked or isEquipped then
+        local header = "|cff00ff00[Loot Hunter]|r"
+        if isEquipped then
+            -- Tracked AND Equipped
+            GameTooltip:AddLine(header)
+            GameTooltip:AddLine(L["VENDOR_EQUIPPED_TOOLTIP"], equippedVendorColor[1], equippedVendorColor[2], equippedVendorColor[3])
+        else
+            -- Tracked only
+            GameTooltip:AddLine(header)
+            GameTooltip:AddLine(L["VENDOR_TRACKED_TOOLTIP"], trackedVendorColor[1], trackedVendorColor[2], trackedVendorColor[3])
+        end
+        GameTooltip:Show()
+    end
 end
 
 local function HighlightTrackedMerchantItems()
@@ -1677,7 +1774,11 @@ local function HighlightTrackedMerchantItems()
             local idx = offset + i
             local link = GetMerchantItemLink and GetMerchantItemLink(idx)
             local itemID = link and tonumber(link:match("item:(%d+):"))
-            if itemID and CurrentCharDB and CurrentCharDB[itemID] then
+            local isTracked = itemID and CurrentCharDB and CurrentCharDB[itemID]
+            local isEquipped = IsItemEquipped(itemID)
+            if isEquipped then
+                nameText:SetTextColor(equippedVendorColor[1], equippedVendorColor[2], equippedVendorColor[3])
+            elseif isTracked then
                 nameText:SetTextColor(trackedVendorColor[1], trackedVendorColor[2], trackedVendorColor[3])
             else
                 local orig = nameText._lh_origColor
@@ -1695,13 +1796,10 @@ local function HookMerchantHighlight()
         HighlightTrackedMerchantItems()
         return res
     end
-    if not merchantTooltipHooked and hooksecurefunc and GameTooltip and GameTooltip.HookScript then
+    if not merchantTooltipHooked and hooksecurefunc and GameTooltip then
         merchantTooltipHooked = true
-        GameTooltip:HookScript("OnTooltipSetItem", function(tip)
-            local owner = tip:GetOwner()
-            if owner and owner:GetName() and owner:GetName():match("^MerchantItem") then
-                AddTrackedInfoToMerchantTooltip(owner)
-            end
+        hooksecurefunc(GameTooltip, "SetMerchantItem", function(tip, slot)
+            AddTrackedInfoToMerchantTooltip(slot)
         end)
     end
 end
@@ -1709,6 +1807,206 @@ local function HandleMerchantEvent()
     HookMerchantHighlight()
     HighlightTrackedMerchantItems()
 end
+
+-- Confirmación antes de buscar mazmorra aleatoria heroica
+local unpackCompat = (table and table.unpack) or unpack
+local heroicJoinHooked = false
+
+local HEROIC_ALERT_ICON = "|TInterface\\DialogFrame\\UI-Dialog-Icon-AlertNew:24:24:0:0|t "
+
+local function GetActiveQueueText()
+    if not GetLFGQueueStats then return nil end
+    for i = 1, 4 do
+        local ok, _, _, _, _, _, _, _, _, _, _, queueName = pcall(GetLFGQueueStats, i)
+        if ok and queueName and queueName ~= "" then
+            return queueName
+        end
+    end
+    return nil
+end
+
+local lastHeroicPrompt = 0
+
+local function PromptHeroicQueueIfNeeded(force)
+    if not (LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.misc and LootHunterDB.settings.misc.heroicQueueConfirm ~= false) then
+        return
+    end
+    local text = GetActiveQueueText()
+    HeroicLog(string.format("Queue text=%s", tostring(text)))
+    if not text or text == "" then return end
+    local lower = string.lower(text)
+    if not (lower:find("heroic", 1, true) or lower:find("heroico", 1, true)) then return end
+    local now = GetTime and GetTime() or 0
+    if not force and now - (lastHeroicPrompt or 0) < 1 then return end
+    if heroPopupShown then return end
+    lastHeroicPrompt = now
+    if not EnsureHeroicQueuePopup then
+        -- fallback inline creator if not yet defined
+        EnsureHeroicQueuePopup = function()
+            if not StaticPopupDialogs then return end
+            StaticPopupDialogs["LOOTHUNTER_CONFIRM_HEROIC_QUEUE"] = StaticPopupDialogs["LOOTHUNTER_CONFIRM_HEROIC_QUEUE"] or {
+                text = "You are already queued for a heroic random dungeon. Continue?",
+                button1 = "Yes, continue",
+                button2 = "No, cancel queue",
+                timeout = 0,
+                whileDead = 1,
+                hideOnEscape = 1,
+                preferredIndex = STATICPOPUP_NUMDIALOGS,
+            }
+        end
+    end
+    EnsureHeroicQueuePopup()
+    local dialog = StaticPopupDialogs and StaticPopupDialogs["LOOTHUNTER_CONFIRM_HEROIC_QUEUE"]
+    if dialog then
+        dialog.text = HEROIC_ALERT_ICON .. (L["HEROIC_QUEUE_ALREADY"] or "You are already queued for a heroic random dungeon. Continue?")
+        dialog.button1 = L["HEROIC_QUEUE_CONFIRM_YES"] or "Yes, continue"
+        dialog.button2 = L["HEROIC_QUEUE_CONFIRM_NO"] or "No, cancel queue"
+        dialog.OnAccept = function() end
+        dialog.OnCancel = function()
+            SafeLeaveLFG()
+        end
+        heroPopupShown = true
+        HeroicLog("Showing heroic queue confirmation popup")
+        StaticPopup_Show("LOOTHUNTER_CONFIRM_HEROIC_QUEUE")
+    end
+end
+
+local function ScheduleHeroicQueueCheck()
+    if not C_Timer or not C_Timer.After then return end
+    heroPopupShown = false
+    C_Timer.After(0.1, PromptHeroicQueueIfNeeded)
+    C_Timer.After(0.4, PromptHeroicQueueIfNeeded)
+    C_Timer.After(1.0, PromptHeroicQueueIfNeeded)
+    C_Timer.After(2.0, function() PromptHeroicQueueIfNeeded(true) end)
+end
+
+local function EnsureHeroicQueuePopup()
+    if not StaticPopupDialogs then return end
+    StaticPopupDialogs["LOOTHUNTER_CONFIRM_HEROIC_QUEUE"] = StaticPopupDialogs["LOOTHUNTER_CONFIRM_HEROIC_QUEUE"] or {
+        text = HEROIC_ALERT_ICON .. (L["HEROIC_QUEUE_CONFIRM_TEXT"] or "You are about to queue for a heroic random dungeon. Continue?"),
+        button1 = L["HEROIC_QUEUE_CONFIRM_YES"] or YES or "Yes",
+        button2 = L["HEROIC_QUEUE_CONFIRM_NO"] or CANCEL or "Cancel",
+        timeout = 0,
+        whileDead = 1,
+        hideOnEscape = 1,
+        preferredIndex = STATICPOPUP_NUMDIALOGS,
+    }
+end
+
+local dropdownButtonsHooked = false
+local function HookLFDTypeDropdownButtons()
+    if dropdownButtonsHooked or not hooksecurefunc then return end
+    dropdownButtonsHooked = true
+    hooksecurefunc("ToggleDropDownMenu", function(_, _, dropdownFrame)
+        if dropdownFrame ~= _G.LFDQueueFrameTypeDropDown then return end
+        -- Limpiar valores previos al abrir
+        currentRandomDungeonName = nil
+        currentRandomDungeonID = nil
+        local maxLevels = _G.UIDROPDOWNMENU_MAXLEVELS or 2
+        local maxButtons = _G.UIDROPDOWNMENU_MAXBUTTONS or 10
+        for level = 1, maxLevels do
+            local list = _G["DropDownList" .. level]
+            if list then
+                for i = 1, maxButtons do
+                    local btn = _G["DropDownList" .. level .. "Button" .. i]
+                    if btn and btn:IsShown() and btn:GetParent() == list then
+                        if not btn._lh_hooked then
+                            btn._lh_hooked = true
+                            btn:HookScript("OnClick", function(self)
+                                local text = self.GetText and self:GetText()
+                                local value = self.value
+                                currentRandomDungeonID = value
+                                currentRandomDungeonName = text
+                                HeroicLog(string.format("Captured via dropdown button: value=%s text=%s", tostring(value), tostring(text)))
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+SetupHeroicQueueConfirm = function()
+    if heroicJoinHooked then return end
+    if not LFDQueueFrame_Join then
+        HeroicLog("LFDQueueFrame_Join not available, cannot hook yet")
+        return
+    end
+    heroicJoinHooked = true
+    HeroicLog("Hooking LFDQueueFrame_Join for confirmation")
+
+    -- Cache del último ID leído para fines de log (no se usa como fuente de decisión)
+    if hooksecurefunc and LFDQueueFrameRandom_SetDungeonID then
+        hooksecurefunc("LFDQueueFrameRandom_SetDungeonID", function(id)
+            if id then
+                currentRandomDungeonID = id
+                currentRandomDungeonName = nil
+                HeroicLog(string.format("Captured random dungeon ID via Random_SetDungeonID: %s", tostring(currentRandomDungeonID)))
+            end
+        end)
+    end
+    if hooksecurefunc and LFDQueueFrame_SetType then
+        hooksecurefunc("LFDQueueFrame_SetType", function(id, typeID)
+            if id then
+                currentRandomDungeonID = id
+                local n = GetLFGDungeonInfo and select(1, GetLFGDungeonInfo(id))
+                currentRandomDungeonName = n or nil
+                HeroicLog(string.format("SetType: id=%s name=%s typeID=%s", tostring(id), tostring(currentRandomDungeonName), tostring(typeID)))
+            end
+        end)
+    end
+    if hooksecurefunc and UIDropDownMenu_SetSelectedValue then
+        hooksecurefunc("UIDropDownMenu_SetSelectedValue", function(frame, value)
+            if frame == _G.LFDQueueFrameTypeDropDown then
+                currentRandomDungeonID = value
+                local n = (type(value) == "number" and GetLFGDungeonInfo and select(1, GetLFGDungeonInfo(value))) or nil
+                currentRandomDungeonName = n or nil
+                HeroicLog(string.format("SetSelectedValue for LFD type: %s (name=%s)", tostring(value), tostring(currentRandomDungeonName)))
+            end
+        end)
+    end
+    if hooksecurefunc and UIDropDownMenu_SetSelectedID then
+        hooksecurefunc("UIDropDownMenu_SetSelectedID", function(frame, id)
+            if frame == _G.LFDQueueFrameTypeDropDown then
+                local val = UIDropDownMenu_GetSelectedValue(frame)
+                currentRandomDungeonID = val or id
+                local n = (type(currentRandomDungeonID) == "number" and GetLFGDungeonInfo and select(1, GetLFGDungeonInfo(currentRandomDungeonID))) or nil
+                currentRandomDungeonName = n or nil
+                HeroicLog(string.format("SetSelectedID for LFD type: id=%s val=%s name=%s", tostring(id), tostring(val), tostring(currentRandomDungeonName)))
+            end
+        end)
+    end
+    if hooksecurefunc and _G.UIDropDownMenuButton_OnClick then
+        hooksecurefunc("UIDropDownMenuButton_OnClick", function(self)
+            local parentList = self and self:GetParent()
+            if not parentList then return end
+            local dropdown = parentList.dropdown
+            if dropdown == _G.LFDQueueFrameTypeDropDown then
+                local text = (self.GetText and self:GetText())
+                    or (self:GetFontString() and self:GetFontString():GetText())
+                    or (self.normalText and self.normalText:GetText())
+                    or (type(self.value) == "number" and GetLFGDungeonInfo and select(1, GetLFGDungeonInfo(self.value)))
+                    or (type(self.value) == "table" and self.value.name)
+                    or nil
+                local value = self.value
+                currentRandomDungeonID = value
+                currentRandomDungeonName = text
+                HeroicLog(string.format("Captured via Button_OnClick: value=%s text=%s", tostring(value), tostring(text)))
+            end
+        end)
+    end
+    HookLFDTypeDropdownButtons()
+
+    local originalJoin = LFDQueueFrame_Join
+    LFDQueueFrame_Join = function(...)
+        HeroicLog("LFDQueueFrame_Join invoked")
+        local args = { ... }
+        originalJoin(unpackCompat and unpackCompat(args) or args[1])
+        ScheduleHeroicQueueCheck()
+    end
+end
+
 local eventHandlers = {
     ADDON_LOADED = HandleAddonLoaded,
     GET_ITEM_INFO_RECEIVED = HandleInfoUpdate,
@@ -1760,57 +2058,6 @@ frame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 frame:RegisterEvent("PLAYER_TALENT_UPDATE")
 frame:RegisterEvent("MERCHANT_SHOW")
 frame:RegisterEvent("MERCHANT_UPDATE")
- -- === SISTEMA DE LOGGING ===
- local DebugLog = {}
- local function IsDebugEnabled()
-     return LootHunterDB
-         and LootHunterDB.settings
-         and LootHunterDB.settings.general
-         and LootHunterDB.settings.general.debugLogging
- end
- addonTable.IsDebugEnabled = IsDebugEnabled
- local function LogDebug(msg)
-     if not IsDebugEnabled() then return end
-     table.insert(DebugLog, msg)
-     print(msg)
- end
- addonTable.DebugLog = DebugLog
- addonTable.LogDebug = LogDebug
- LogCoinDebug = function(msg)
-     if not IsDebugEnabled() then return end
-     if addonTable.LogDebug then
-         addonTable.LogDebug("|cff00ffff[Coin Debug]|r " .. msg)
-     end
- end
-local function ExportDebugLog()
-    if #DebugLog == 0 then
-        print(L["LOG_EMPTY_CONSOLE"])
-        return
-    end
-    if CreateCopyLogWindow then
-        CreateCopyLogWindow()
-    end
-end
-SLASH_LOOTHUNTER_EXPORT1 = "/loothunter_export"
-SlashCmdList["LOOTHUNTER_EXPORT"] = function()
-    ExportDebugLog()
-end
-SLASH_LOOTHUNTER_DEBUG1 = "/loothunter_debug"
-SlashCmdList["LOOTHUNTER_DEBUG"] = function()
-    if not LootHunterDB then LootHunterDB = {} end
-    if not LootHunterDB.settings then LootHunterDB.settings = {} end
-    if not LootHunterDB.settings.general then LootHunterDB.settings.general = {} end
-    local current = LootHunterDB.settings.general.debugLogging
-    LootHunterDB.settings.general.debugLogging = not current
-    print(string.format("[Loot Hunter] Debug logging %s", LootHunterDB.settings.general.debugLogging and "enabled" or "disabled"))
-    print("[Loot Hunter] Reload the UI (/reload) to update the log tab visibility.")
-end
-SLASH_LOOTHUNTER_SPEC1 = "/loothunter_spec"
-SLASH_LOOTHUNTER_SPEC2 = "/lh_spec"
-SlashCmdList["LOOTHUNTER_SPEC"] = function()
-    local specName = ResolveSpecName()
-    print(string.format("[Loot Hunter] Current spec: %s", specName or "Unknown"))
-end
 -- === CACHE DE LOOT (EJ) ===
 local LootSourceCache = {}
 local StaticDBBuilt = false
@@ -2289,7 +2536,9 @@ SlashCmdList["LOOTHUNTER_WON"] = function(msg)
                 if addonTable.ShowAlert then
                     addonTable.ShowAlert(string.format("%s\n%s\n%s", winBanner, winDesc, itemLine), 0, 1, 0)
                 end
-                PlaySound(12891)
+                if not PlaySound(12891, "Master") then
+                    PlaySound(12891)
+                end
             end)
             print(string.format(L["CONGRATS_CHAT_MSG"], itemLine))
         end

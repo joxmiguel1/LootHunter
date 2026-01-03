@@ -106,6 +106,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
                 height = math.max(24, labelHeight)
             end
             if entry.desc then
+                if entry.desc.SetHeight then entry.desc:SetHeight(0) end
                 local descHeight = entry.desc:GetStringHeight() or 0
                 if descHeight == 0 then
                     descHeight = FallbackHeight(entry.desc, 5)
@@ -184,6 +185,31 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
             extraHeight = 0,
             afterSpacing = afterSpacing,
             compact = panel._compactEntries,
+        })
+        ReflowPanel(panel)
+        return entryFrame
+    end
+
+    local function CreateDescription(panel, text)
+        if not panel then return nil end
+        local entryFrame = CreateFrame("Frame", nil, panel)
+        entryFrame:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+        entryFrame:SetPoint("RIGHT", panel, "RIGHT", 0, 0)
+        local fs = entryFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        fs:SetPoint("TOPLEFT", entryFrame, "TOPLEFT", 20, 0)
+        fs:SetPoint("RIGHT", entryFrame, "RIGHT", -10, 0)
+        fs:SetJustifyH("LEFT")
+        fs:SetJustifyV("TOP")
+        fs:SetWordWrap(true)
+        if fs.SetNonSpaceWrap then pcall(fs.SetNonSpaceWrap, fs, true) end
+        if fs.SetMaxLines then pcall(fs.SetMaxLines, fs, 0) end
+        fs:SetText(text or "")
+        table.insert(panel._layout, {
+            frame = entryFrame,
+            label = fs,
+            extraHeight = 0,
+            afterSpacing = 8,
+            compact = true,
         })
         ReflowPanel(panel)
         return entryFrame
@@ -665,7 +691,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
             desc:SetPoint("RIGHT", entryFrame, "RIGHT", -10, 0)
             desc:SetJustifyH("LEFT")
             desc:SetWordWrap(true)
-            desc:SetMaxLines(5)
+            if desc.SetMaxLines then pcall(desc.SetMaxLines, desc, 0) end -- allow full wrap
             if desc.SetNonSpaceWrap then
                 pcall(desc.SetNonSpaceWrap, desc, true)
             end
@@ -844,8 +870,6 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         alertsPanel._layout[#alertsPanel._layout].afterSpacing = (alertsPanel._layout[#alertsPanel._layout].afterSpacing or 0) + 10
         ReflowPanel(alertsPanel)
     end
-    CreateSectionHeader(alertsPanel, L["SETTING_ALERTS_MISC_TITLE"], -10)
-    Settings:CreateCheckbox(alertsPanel, "lootAlerts.bossNoItems", L["SETTING_ALERTS_BOSS_NONE_LABEL"], L["SETTING_ALERTS_BOSS_NONE_DESC"])
 
     local windowPanel = Settings:CreateCategory("Window", L["WINDOW_SETTINGS"])
     windowPanel._entryAfterSpacing = -2
@@ -932,6 +956,12 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         SetLanguageValue,
         L["SETTING_LANGUAGE_DESC"]
     )
+
+    -- Miscellaneous (placed last in sidebar)
+    local miscPanel = Settings:CreateCategory("Miscellaneous", L["SETTING_MISC_TITLE"])
+    CreateDescription(miscPanel, L["SETTING_MISC_DESC"])
+    Settings:CreateCheckbox(miscPanel, "lootAlerts.bossNoItems", L["SETTING_ALERTS_BOSS_NONE_LABEL"], L["SETTING_ALERTS_BOSS_NONE_DESC"])
+    Settings:CreateCheckbox(miscPanel, "misc.heroicQueueConfirm", L["SETTING_MISC_HEROIC_LABEL"], L["SETTING_MISC_HEROIC_DESC"])
 
     -- Seleccionar la primera categoria por defecto
     Settings:SelectCategory(_G["LootHunter_SettingsCategory_CoinReminder"])

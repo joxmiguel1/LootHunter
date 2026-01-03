@@ -2,7 +2,7 @@
 ## Title: |cff00a86bLoot Hunter|r
 ## Notes: Rastrea tu loot deseado y alerta cuando aparece en el botin.
 ## Author: Xamael
-## Version: 1.5.2-test
+## Version: 1.5.3-test
 ## SavedVariables: LootHunterDB
 
 
@@ -18,4 +18,5 @@ Localization.lua
 Settings.lua
 Minimap.lua
 UI.lua
+Modules/Debug.lua
 LootHunter.lua

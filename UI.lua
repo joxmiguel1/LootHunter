@@ -20,7 +20,7 @@ local pendingRefresh = false
 local specRowMenuFrame = nil
 local specRowMenuOverlay = nil
 local typeMenuFrame, sourceMenuFrame, specMenuFrame = nil, nil, nil
-local DEFAULT_WINDOW_WIDTH = 510
+local DEFAULT_WINDOW_WIDTH = 530
 local DEFAULT_WINDOW_HEIGHT = 456
 addonTable.DEFAULT_WINDOW_WIDTH = DEFAULT_WINDOW_WIDTH
 addonTable.DEFAULT_WINDOW_HEIGHT = DEFAULT_WINDOW_HEIGHT
@@ -57,6 +57,16 @@ end
 local function GetEquippedIconTag()
     local path = (addonTable and addonTable.UseFallbackEquippedIcon) and EQUIPPED_ICON_FALLBACK or EQUIPPED_ICON_PATH
     return string.format("|T%s:14:14|t", path)
+end
+
+local function RefreshRowTooltip(row, showCompare)
+    if not row or not row._tooltipLink or not GameTooltip then return end
+    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+    GameTooltip:SetHyperlink(row._tooltipLink)
+    if showCompare and GameTooltip_ShowCompareItem then
+        pcall(GameTooltip_ShowCompareItem, GameTooltip)
+    end
+    GameTooltip:Show()
 end
 
 -- Fuerza nuestra fuente en todas las FontStrings de un frame (recursivo)
@@ -2154,7 +2164,8 @@ function LootHunter_RefreshUI()
         if rowState == "priority" then
             borderColor = {1, 0.9, 0, 0.8}
         elseif rowState == "won" then
-            borderColor = {0, 1, 0, 0.8}
+            local pr, pg, pb = GetPrimaryColor()
+            borderColor = {pr, pg, pb, 0.8}
         end
         row:SetBackdropBorderColor(unpack(borderColor))
 
@@ -2247,9 +2258,10 @@ function LootHunter_RefreshUI()
 
         -- Aplicar color de estado y mantener el borde adecuado
         if info.status == 2 then 
+            local pr, pg, pb = GetPrimaryColor()
             textName:SetText("|cff00ff00" .. displayName .. "|r")
             textBoss:SetTextColor(0, 1, 0)
-            row:SetBackdropBorderColor(0, 1, 0, 0.9)
+            row:SetBackdropBorderColor(pr, pg, pb, 0.9)
         elseif info.status == 1 then
             local dropLabel = CreateGradient("[DROP]: ", 1, 0.85, 0.35, 1, 0.65, 0)
             textName:SetText(dropLabel .. "|cffffd700" .. displayName .. "|r")
@@ -2261,11 +2273,23 @@ function LootHunter_RefreshUI()
         end
 
         row:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetHyperlink(info.link) -- Restaurado
-            GameTooltip:Show()
+            self._tooltipLink = info.link
+            self._lastCompare = IsModifiedClick and IsModifiedClick("COMPAREITEMS") or false
+            RefreshRowTooltip(self, self._lastCompare)
+            self:SetScript("OnUpdate", function(f)
+                local cmp = IsModifiedClick and IsModifiedClick("COMPAREITEMS") or false
+                if cmp ~= f._lastCompare then
+                    f._lastCompare = cmp
+                    RefreshRowTooltip(f, cmp)
+                end
+            end)
         end)
-        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row:SetScript("OnLeave", function(self)
+            self._tooltipLink = nil
+            self._lastCompare = nil
+            self:SetScript("OnUpdate", nil)
+            GameTooltip:Hide()
+        end)
         
         local lastClick = 0
         row:SetScript("OnMouseDown", function(self, button)

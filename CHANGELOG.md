@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.5.3-test
+- Added won-row border in primary color and updated Help > Status text (won) plus epic purple title for Equipped.
+- Tooltip compare now refreshes when you press/hold Shift while hovering list items (no compare when Shift isn’t held).
+- /lh_drop and /lh_won previews play sounds on Master channel; DROP prompt only in raids; when multiple tracked drops happen together, “other won” alerts are suppressed to reduce noise.
+
 ## 1.5.2-test
 - Added configurable coin reminder wait (30s-150s slider, default 150s) and debug logs showing the chosen value when timers start.
 - Hooked Group Loot need/greed (`START_LOOT_ROLL`) to fire DROP alerts in dungeons; registered the event and improved logs with item ID + name.
@@ -10,8 +15,11 @@ All notable changes to this project will be documented in this file.
 - DROP alert logs now include item names for easier debugging.
 - Removed the experimental vendor search feature and its settings tab (was off by default).
 - Vendor items that are already on your list now show a subtle green name tint in merchant windows.
+- Vendor items you already have equipped now show a bright green name tint and an “already equipped” tooltip line.
 - Vendor tooltips for tracked items now include a green Loot Hunter header and localized “already on your list” line.
 - Fixed Spanish localization encoding (all accented characters render correctly again) and added a tip about adding vendor items via Shift+Click.
+- Moved debug/logging helpers into `Modules/Debug.lua` to isolate diagnostics and slash commands.
+- Added a confirmation popup before queuing for a heroic random dungeon, styled with the Blizzard alert icon
 
 ## 1.5.1-test
 - Added debug slash commands: `/lh_boss`, `/lh_drop`, `/lh_won`.
@@ -41,7 +49,6 @@ All notable changes to this project will be documented in this file.
 - Pre-warning now checks 3s after boss death when the bonus roll window is visible.
 - Added alert debug logging for prewarning/drop/win/other-won/coin reminders.
 - Added optional chat alert when a boss has no items on your list (only if the instance has tracked items).
-- Added Loot Alerts "Miscellaneous" subsection with toggle for boss-no-items alert.
 - Added debug logging for bonus roll window visibility checks.
 - Reduced loot debug spam to tracked items only.
 - Help icon reset now clears all settings and minimap/window state, but only resets the current character's list.
