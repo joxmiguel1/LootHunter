@@ -835,6 +835,22 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         PlaySound(12867, "Master")
     end
 
+    local function PreviewLostAlert()
+        if addonTable.ResetPreviewVisuals then addonTable.ResetPreviewVisuals() end
+        local fakeItem = "|cffa335ee[Corrupted Ashbringer]|r"
+        local fakeWinner = "Arthas Menethil"
+        local coloredWinner = string.format("|cffff0000%s|r", fakeWinner)
+        local msg = string.format(L["DROP_OTHER_CHAT_MSG"] or "%s was won by %s.", fakeItem, coloredWinner)
+        print(msg)
+        if addonTable.ShowPreWarningFrame then
+            addonTable.ShowPreWarningFrame(msg, 6, false, true)
+        elseif addonTable.ShowAlert then
+            addonTable.ShowAlert(msg, 1, 0, 0)
+        end
+        if addonTable.FlashScreen then addonTable.FlashScreen("RED") end
+        -- Preview intentionally without sound.
+    end
+
     local function PreviewOtherWonSound()
         if addonTable.ResetPreviewVisuals then addonTable.ResetPreviewVisuals() end
         local fakeItem = "|cffa335ee[Corrupted Ashbringer]|r"
@@ -865,7 +881,32 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     local alertsPanel = Settings:CreateCategory("LootAlerts", L["LOOT_ALERTS_SETTINGS"])
     Settings:CreateCheckbox(alertsPanel, "lootAlerts.itemWon", L["SETTING_ALERTS_WON_LABEL"], L["SETTING_ALERTS_WON_DESC"], nil, PreviewItemWon)
     Settings:CreateCheckbox(alertsPanel, "lootAlerts.itemSeen", L["SETTING_ALERTS_SEEN_LABEL"], L["SETTING_ALERTS_SEEN_DESC"], nil, PreviewItemSeen)
+    CreateSectionHeader(alertsPanel, L["SETTING_ALERTS_LOST_SECTION"], -2)
+    CreateDescription(alertsPanel, L["SETTING_ALERTS_LOST_DESC"])
+    if alertsPanel._layout and alertsPanel._layout[#alertsPanel._layout] then
+        alertsPanel._layout[#alertsPanel._layout].afterSpacing = 1
+    end
+    Settings:CreateCheckbox(alertsPanel, "lootAlerts.lostAlertEnabled", L["SETTING_ALERTS_LOST_ENABLE_LABEL"], nil, nil, PreviewLostAlert)
     Settings:CreateCheckbox(alertsPanel, "lootAlerts.otherWonSound", L["SETTING_ALERTS_OTHER_SOUND_LABEL"], L["SETTING_ALERTS_OTHER_SOUND_DESC"], nil, PreviewOtherWonSound)
+    local function GetLostScope()
+        return addonTable.db and addonTable.db.settings and addonTable.db.settings.lootAlerts and addonTable.db.settings.lootAlerts.lostAlertScope or "RAID"
+    end
+    local function SetLostScope(value)
+        if not (addonTable.db and addonTable.db.settings and addonTable.db.settings.lootAlerts) then return end
+        addonTable.db.settings.lootAlerts.lostAlertScope = value
+    end
+    local lostScopeOptions = {
+        { value = "ALL", label = L["SETTING_ALERTS_LOST_SCOPE_ALL"] },
+        { value = "RAID", label = L["SETTING_ALERTS_LOST_SCOPE_RAID"] },
+        { value = "DUNGEON", label = L["SETTING_ALERTS_LOST_SCOPE_DUNGEON"] },
+    }
+    CreateDropdownRow(
+        alertsPanel,
+        L["SETTING_ALERTS_LOST_SCOPE_LABEL"],
+        lostScopeOptions,
+        GetLostScope,
+        SetLostScope
+    )
     if alertsPanel._layout and alertsPanel._layout[#alertsPanel._layout] then
         alertsPanel._layout[#alertsPanel._layout].afterSpacing = (alertsPanel._layout[#alertsPanel._layout].afterSpacing or 0) + 10
         ReflowPanel(alertsPanel)

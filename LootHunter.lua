@@ -380,6 +380,8 @@ local function InitializeSettings()
             itemWon = true,
             itemSeen = true,
             otherWonSound = true,
+            lostAlertEnabled = true,
+            lostAlertScope = "ALL",
             bossNoItems = false,
         },
         misc = {
@@ -407,6 +409,14 @@ local function InitializeSettings()
                     LootHunterDB.settings[category][key] = value
                 end
             end
+        end
+    end
+    -- Normalizar alcance de alerta de loot perdido
+    if LootHunterDB.settings and LootHunterDB.settings.lootAlerts then
+        local scope = LootHunterDB.settings.lootAlerts.lostAlertScope
+        local valid = { ALL = true, RAID = true, DUNGEON = true }
+        if not valid[scope] then
+            LootHunterDB.settings.lootAlerts.lostAlertScope = "ALL"
         end
     end
 end
@@ -451,7 +461,16 @@ local function HandleAddonLoaded(event, arg1)
     if not LootHunterDB.windowSettings then
         local screenWidth = (GetScreenWidth and GetScreenWidth()) or (UIParent and UIParent:GetWidth()) or 0
         local defaultX = -math.floor((screenWidth or 0) * 0.10)
-        LootHunterDB.windowSettings = { point = "RIGHT", relativePoint = "RIGHT", x = defaultX, y = 0, width = 530, height = 463 }
+        local defaultWidth = addonTable.DEFAULT_WINDOW_WIDTH or 530
+        local defaultHeight = addonTable.DEFAULT_WINDOW_HEIGHT or 456
+        LootHunterDB.windowSettings = {
+            point = "RIGHT",
+            relativePoint = "RIGHT",
+            x = defaultX,
+            y = 0,
+            width = defaultWidth,
+            height = defaultHeight,
+        }
     end
     if not LootHunterDB.buttonPos then
         LootHunterDB.buttonPos = { point = "CENTER", x = -200, y = 0 }
@@ -878,6 +897,97 @@ local function HandleSpecChange(event, unit)
     lastSpecName = ResolveSpecName()
     LootHunter_RefreshUI()
 end
+
+-- Buscar la entrada de recordatorio de moneda que contenga un itemID
+local function FindReminderKeyForItem(itemID)
+    if not itemID then return nil end
+    for key, entry in pairs(PendingCoinReminders) do
+        if entry and entry.items then
+            for _, pendingID in ipairs(entry.items) do
+                if pendingID == itemID then
+                    return key
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function MarkDropSeen(itemID, reason)
+    local key = FindReminderKeyForItem(itemID)
+    if not key then return end
+    local entry = PendingCoinReminders[key]
+    if not entry then return end
+    entry.dropSeen = true
+    entry.blockCoin = true
+    entry.dropSeenAt = GetTime()
+    LogCoinDebug(string.format("Drop seen for item %d (reason: %s) - blocking coin reminder.", itemID, reason or "unknown"))
+end
+
+local function ShowDropAlert(itemID, itemData)
+    if not itemID and itemData and itemData.id then
+        itemID = itemData.id
+    end
+    if not itemID then return end
+    itemData = itemData or (CurrentCharDB and CurrentCharDB[itemID])
+    if not itemData then return end
+    -- Actualiza estado en la DB
+    if CurrentCharDB and CurrentCharDB[itemID] then
+        CurrentCharDB[itemID].status = 1
+        CurrentCharDB[itemID].lastState = "drop"
+    end
+    lastAnnouncedRollItemID = itemID
+    lastAnnouncedRollTime = GetTime()
+    MarkDropSeen(itemID, "drop_alert")
+    -- Auto-reset del estado DROP tras 45s si sigue pendiente
+    C_Timer.After(45, function()
+        if CurrentCharDB and CurrentCharDB[itemID] and CurrentCharDB[itemID].status == 1 then
+            CurrentCharDB[itemID].status = 0
+            LootHunter_RefreshUI()
+        end
+    end)
+    local now = GetTime()
+    if LastDropAlert[itemID] and (now - LastDropAlert[itemID] < 2) then
+        return
+    end
+    LastDropAlert[itemID] = now
+    -- Detect batch of multiple tracked drops close in time to suppress other-won spam
+    if (now - (dropBatchStart or 0)) > 10 then
+        dropBatchStart = now
+        dropBatchCount = 0
+    end
+    dropBatchCount = (dropBatchCount or 0) + 1
+    if dropBatchCount >= 2 then
+        suppressOtherWonUntil = math.max(suppressOtherWonUntil or 0, now + MULTI_DROP_SUPPRESS_WINDOW)
+        LogAlertDebug(string.format("Multiple drops detected (%d in batch); suppressing other-won for %.1fs", dropBatchCount, suppressOtherWonUntil - now))
+    end
+    local dropTitle = CreateGradient(L["DROP_ALERT_TITLE"], 1, 0.7, 0.2, 1, 0.45, 0)
+    local dropHeader = string.format("%s %s %s", ICON_DIAMOND, dropTitle, ICON_DIAMOND)
+    local dropItemLine = string.format("%s!", itemData.link or itemData.name or tostring(itemID))
+    local _, instanceType = IsInInstance()
+    -- Only show the roll reminder prompt in raids (no /roll flow in dungeons).
+    local showPrompt = (instanceType == "raid")
+    local dropPrompt = showPrompt and CreateGradient(L["DROP_ALERT_PROMPT"], 1, 0.85, 0.35, 1, 0.75, 0) or nil
+    local alertText = dropHeader .. "\n" .. dropItemLine .. (dropPrompt and ("\n" .. dropPrompt) or "")
+    if not IsScopeAllowed(LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts and LootHunterDB.settings.lootAlerts.lostAlertScope) then
+        return
+    end
+    EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_PRIMARY, function()
+        if addonTable.FlashScreen then addonTable.FlashScreen("ORANGE") end
+        if addonTable.ShowAlert then
+            addonTable.ShowAlert(alertText, 1, 0.55, 0.05)
+        end
+        if not PlaySound(12867, "Master") then
+            PlaySound(12867)
+        end
+    end)
+    if L["DROP_CHAT_MSG"] then
+        print(string.format(L["DROP_CHAT_MSG"], itemData.link or itemData.name or tostring(itemID)))
+    end
+    local displayName = itemData.link or itemData.name or tostring(itemID)
+    LogAlertDebug(string.format("DROP alert shown for item %s (%s)", tostring(itemID), displayName))
+end
+
 local function HandleLootEvent(event)
     if PendingCoinReminders and next(PendingCoinReminders) then
         LogCoinDebug(string.format("Event %s received. Checking pending coin timers.", event))
@@ -1067,20 +1177,6 @@ local function ActivatePendingForBonusRoll(reason)
         end
     end
 end
--- Buscar la entrada de recordatorio de moneda que contenga un itemID
-local function FindReminderKeyForItem(itemID)
-    if not itemID then return nil end
-    for key, entry in pairs(PendingCoinReminders) do
-        if entry and entry.items then
-            for _, pendingID in ipairs(entry.items) do
-                if pendingID == itemID then
-                    return key
-                end
-            end
-        end
-    end
-    return nil
-end
 local function RemoveItemFromReminder(itemID)
     local key = FindReminderKeyForItem(itemID)
     if not key then return end
@@ -1096,76 +1192,6 @@ local function RemoveItemFromReminder(itemID)
     if #remaining == 0 then
         PendingCoinReminders[key] = nil
     end
-end
-local function MarkDropSeen(itemID, reason)
-    local key = FindReminderKeyForItem(itemID)
-    if not key then return end
-    local entry = PendingCoinReminders[key]
-    if not entry then return end
-    entry.dropSeen = true
-    entry.blockCoin = true
-    entry.dropSeenAt = GetTime()
-    LogCoinDebug(string.format("Drop seen for item %d (reason: %s) - blocking coin reminder.", itemID, reason or "unknown"))
-end
-local function ShowDropAlert(itemID, itemData)
-    if not itemID and itemData and itemData.id then
-        itemID = itemData.id
-    end
-    if not itemID then return end
-    itemData = itemData or (CurrentCharDB and CurrentCharDB[itemID])
-    if not itemData then return end
-    -- Actualiza estado en la DB
-    if CurrentCharDB and CurrentCharDB[itemID] then
-        CurrentCharDB[itemID].status = 1
-        CurrentCharDB[itemID].lastState = "drop"
-    end
-    lastAnnouncedRollItemID = itemID
-    lastAnnouncedRollTime = GetTime()
-    MarkDropSeen(itemID, "drop_alert")
-    -- Auto-reset del estado DROP tras 45s si sigue pendiente
-    C_Timer.After(45, function()
-        if CurrentCharDB and CurrentCharDB[itemID] and CurrentCharDB[itemID].status == 1 then
-            CurrentCharDB[itemID].status = 0
-            LootHunter_RefreshUI()
-        end
-    end)
-    local now = GetTime()
-    if LastDropAlert[itemID] and (now - LastDropAlert[itemID] < 2) then
-        return
-    end
-    LastDropAlert[itemID] = now
-    -- Detect batch of multiple tracked drops close in time to suppress other-won spam
-    if (now - (dropBatchStart or 0)) > 10 then
-        dropBatchStart = now
-        dropBatchCount = 0
-    end
-    dropBatchCount = (dropBatchCount or 0) + 1
-    if dropBatchCount >= 2 then
-        suppressOtherWonUntil = math.max(suppressOtherWonUntil or 0, now + MULTI_DROP_SUPPRESS_WINDOW)
-        LogAlertDebug(string.format("Multiple drops detected (%d in batch); suppressing other-won for %.1fs", dropBatchCount, suppressOtherWonUntil - now))
-    end
-    local dropTitle = CreateGradient(L["DROP_ALERT_TITLE"], 1, 0.7, 0.2, 1, 0.45, 0)
-    local dropHeader = string.format("%s %s %s", ICON_DIAMOND, dropTitle, ICON_DIAMOND)
-    local dropItemLine = string.format("%s!", itemData.link or itemData.name or tostring(itemID))
-    local _, instanceType = IsInInstance()
-    -- Only show the roll reminder prompt in raids (no /roll flow in dungeons).
-    local showPrompt = (instanceType == "raid")
-    local dropPrompt = showPrompt and CreateGradient(L["DROP_ALERT_PROMPT"], 1, 0.85, 0.35, 1, 0.75, 0) or nil
-    local alertText = dropHeader .. "\n" .. dropItemLine .. (dropPrompt and ("\n" .. dropPrompt) or "")
-    EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_PRIMARY, function()
-        if addonTable.FlashScreen then addonTable.FlashScreen("ORANGE") end
-        if addonTable.ShowAlert then
-            addonTable.ShowAlert(alertText, 1, 0.55, 0.05)
-        end
-        if not PlaySound(12867, "Master") then
-            PlaySound(12867)
-        end
-    end)
-    if L["DROP_CHAT_MSG"] then
-        print(string.format(L["DROP_CHAT_MSG"], itemData.link or itemData.name or tostring(itemID)))
-    end
-    local displayName = itemData.link or itemData.name or tostring(itemID)
-    LogAlertDebug(string.format("DROP alert shown for item %s (%s)", tostring(itemID), displayName))
 end
 -- Buffs de moneda MoP: Seal of Power (LFR), Seal of Fate (Normal)
 local bonusSpellIDs = {126938, 128362}
@@ -1425,12 +1451,56 @@ local function ShouldTriggerOtherWon(itemID)
         LogAlertDebug(string.format("Suppressing other-won for item %s (multi-drop active, %.1fs remaining)", tostring(itemID), suppressOtherWonUntil - now))
         return false
     end
-    if not lastPlayerRollItemID or lastPlayerRollItemID ~= itemID then return false end
-    if not lastPlayerRollTime then return false end
-    if not lastAnnouncedRollItemID or lastAnnouncedRollItemID ~= itemID then return false end
-    if not lastAnnouncedRollTime then return false end
-    if lastPlayerRollTime < lastAnnouncedRollTime then return false end
-    return (GetTime() - lastPlayerRollTime) <= ROLL_TRACK_WINDOW
+    if not lastPlayerRollItemID or lastPlayerRollItemID ~= itemID then
+        LogAlertDebug(string.format("Other-won skip: no matching player roll for %s", tostring(itemID)))
+        return false
+    end
+    if not lastPlayerRollTime then
+        LogAlertDebug("Other-won skip: missing player roll time")
+        return false
+    end
+    if not lastAnnouncedRollItemID or lastAnnouncedRollItemID ~= itemID then
+        LogAlertDebug("Other-won skip: no announced roll for this item")
+        return false
+    end
+    if not lastAnnouncedRollTime then
+        LogAlertDebug("Other-won skip: missing announced roll time")
+        return false
+    end
+    if lastPlayerRollTime < lastAnnouncedRollTime then
+        LogAlertDebug("Other-won skip: player roll was before drop announce")
+        return false
+    end
+    local within = (GetTime() - lastPlayerRollTime) <= ROLL_TRACK_WINDOW
+    if not within then
+        LogAlertDebug("Other-won skip: roll too old")
+    end
+    return within
+end
+
+local function IsScopeAllowed(scope)
+    scope = scope or "ALL"
+    if scope == "ALL" then return true end
+    local inInstance, instanceType = IsInInstance()
+    if not inInstance then return false end
+    if scope == "RAID" then
+        return instanceType == "raid"
+    elseif scope == "DUNGEON" then
+        return instanceType == "party"
+    end
+    return true
+end
+
+local function ShouldShowLostAlert()
+    local settings = LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts
+    if not settings or settings.lostAlertEnabled == false then return false end
+    return IsScopeAllowed(settings.lostAlertScope)
+end
+
+local function RecentlyDropped(itemID)
+    if not itemID or not LastDropAlert[itemID] then return false end
+    local now = GetTime and GetTime() or 0
+    return (now - LastDropAlert[itemID]) <= ROLL_TRACK_WINDOW
 end
 
 local function HandleChatSystem(event, msg, ...)
@@ -1471,6 +1541,14 @@ local function HandleChatLoot(event, msg, ...)
     if not itemLink then return end
     local id = tonumber(string.match(itemLink, "item:(%d+):"))
     if not id then return end
+    if LogDebug then
+        LogDebug(string.format("|cff00ff00[Alert]|r Loot chat detected: item=%s (id=%s) source=%s player=%s tracked=%s",
+            tostring(itemLink),
+            tostring(id),
+            isMine and "self" or "other",
+            tostring(playerName or UnitName("player") or "?"),
+            tostring(CurrentCharDB and CurrentCharDB[id] and true or false)))
+    end
     TriggerLootActivityTimerForItemID(id)
     if CurrentCharDB[id] then
         local itemData = CurrentCharDB[id]
@@ -1480,7 +1558,8 @@ local function HandleChatLoot(event, msg, ...)
                 itemData.lastState = "won"
                 LootHunter_RefreshUI()
                 RemoveItemFromReminder(id)
-                if LootHunterDB.settings.lootAlerts.itemWon then
+                local allowScope = IsScopeAllowed(LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts and LootHunterDB.settings.lootAlerts.lostAlertScope)
+                if allowScope and LootHunterDB.settings.lootAlerts.itemWon then
                     local winTitle = CreateGradient(L["WIN_ALERT_TITLE"], 0.35, 1, 0.35, 0.65, 1, 0.65)
                     local winDesc = CreateGradient(L["WIN_ALERT_DESC"], 0.35, 1, 0.35, 0.65, 1, 0.65)
                     local winBanner = string.format("%s %s %s", ICON_STAR, winTitle, ICON_STAR)
@@ -1497,10 +1576,14 @@ local function HandleChatLoot(event, msg, ...)
                 end
             end
         else
-            if itemData.status == 0 and ShouldTriggerOtherWon(id) then
-                itemData.status = 1 
+            if itemData.status ~= 2 then
+                local viaRoll = ShouldTriggerOtherWon(id)
+                local viaRecentDrop = not viaRoll and RecentlyDropped(id)
+                if viaRoll or viaRecentDrop then
+                itemData.status = 1
                 LootHunter_RefreshUI()
-                if LootHunterDB.settings.lootAlerts.itemSeen then
+                local allowLostAlert = ShouldShowLostAlert()
+                if allowLostAlert and LootHunterDB.settings.lootAlerts.itemSeen then
                     -- Solo mensaje local cuando otro jugador lo obtiene; sin alerta visual/sonora.
                     local looter = playerName or L["UNKNOWN_SOURCE"]
                     local coloredLooter = string.format("|cffff0000%s|r", looter)
@@ -1516,7 +1599,11 @@ local function HandleChatLoot(event, msg, ...)
                         if addonTable.PlayOtherWonSound then addonTable.PlayOtherWonSound() end
                         if addonTable.FlashScreen then addonTable.FlashScreen("RED") end
                     end
-                    LogAlertDebug("OTHER_WON alert shown for item " .. tostring(id))
+                    LogAlertDebug(string.format("OTHER_WON alert shown for item %s (via %s)", tostring(id), viaRoll and "roll" or "recent drop"))
+                    if LogDebug then
+                        local reason = viaRoll and "roll" or "recent drop"
+                        LogDebug(string.format("|cff00ff00[Alert]|r OTHER_WON item=%s reason=%s looter=%s", tostring(id), reason, tostring(playerName or "?")))
+                    end
                     if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder
                         and LootHunterDB.settings.coinReminder.enabled
                         and IsBonusRollWindowVisible() then
@@ -1570,6 +1657,7 @@ local function HandleChatLoot(event, msg, ...)
                         LootHunter_RefreshUI()
                     end
                 end)
+                end
             end
         end
     end
@@ -1691,6 +1779,11 @@ local function HandleStartLootRoll(event, rollID, rollTime)
     LogAlertDebug(string.format("START_LOOT_ROLL detected for pending item %d (%s)", id, itemName))
     ShowDropAlert(id, itemData)
     LootHunter_RefreshUI()
+    -- Marca el ítem como anunciado/rolado para habilitar alerta de loot perdido en Need/Greed (calabozos).
+    lastAnnouncedRollItemID = id
+    lastAnnouncedRollTime = GetTime()
+    lastPlayerRollItemID = id
+    lastPlayerRollTime = GetTime()
 end
 
 -- Resalta en verde los objetos del vendedor según estado (lista o equipado)
@@ -2544,4 +2637,3 @@ SlashCmdList["LOOTHUNTER_WON"] = function(msg)
         end
     end
 end
-

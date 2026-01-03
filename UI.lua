@@ -617,7 +617,8 @@ function LootHunter_CreateGUI()
     mainFrame:SetBackdropColor(0.11, 0.11, 0.11, 0.95)
     mainFrame:SetBackdropBorderColor(0, 0, 0, 1)
     mainFrame:SetResizable(true)
-    mainFrame:SetResizeBounds(510, 436, 28000, 28000) 
+    -- Mantener el mínimo igual al tamaño por defecto para que no se pueda encoger más tras reset.
+    mainFrame:SetResizeBounds(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, 28000, 28000)
     
     local settings = LootHunterDB.windowSettings
     mainFrame:SetSize(settings.width or DEFAULT_WINDOW_WIDTH, settings.height or DEFAULT_WINDOW_HEIGHT)
@@ -1172,14 +1173,14 @@ function LootHunter_CreateGUI()
     local defaultQuote = GetEmptyQuoteText()
     emptyQuote:SetText(defaultQuote)
     emptyQuote.selectedText = defaultQuote
-    if emptyQuote.baseFont and emptyQuote.smallFontSize then
-        emptyQuote:SetFont(ACCENT_FONT, emptyQuote.smallFontSize, emptyQuote.baseFlags)
+    local function ApplyQuoteFont(useDefaultFont)
+        local size = emptyQuote.smallFontSize or emptyQuote.baseSize or 12
+        local font = useDefaultFont and emptyQuote.baseFont or ACCENT_FONT
+        emptyQuote:SetFont(font or ACCENT_FONT, size, emptyQuote.baseFlags)
     end
+    ApplyQuoteFont(false)
     emptyQuote:HookScript("OnShow", function()
-        local font, size, flags = emptyQuote:GetFont()
-        if font and emptyQuote.smallFontSize then
-            emptyQuote:SetFont(font, emptyQuote.smallFontSize, flags)
-        end
+        ApplyQuoteFont(false)
     end)
 
     emptyInstruction = emptyContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -1568,6 +1569,113 @@ function LootHunter_CreateGUI()
     -- 5. VISTA CREDITOS
     local creditsTitle = CreateHelpText(viewCredits, L["HELP_CREDITS_TITLE"], nil, -4, true)
     ApplySubtitleStyle(creditsTitle)
+    local creditsDesc = CreateHelpText(viewCredits, L["CREDITS_HEADING"], creditsTitle, -10, true)
+    creditsDesc:SetJustifyH("CENTER")
+    creditsDesc:SetTextColor(0.9, 0.9, 0.9)
+    creditsDesc:ClearAllPoints()
+    creditsDesc:SetPoint("TOP", creditsTitle, "BOTTOM", 0, -10)
+    creditsDesc:SetWidth(460)
+
+    local creditsBody = CreateHelpText(viewCredits, L["CREDITS_DESC"], creditsDesc, -10, false)
+    creditsBody:SetJustifyH("CENTER")
+    creditsBody:ClearAllPoints()
+    creditsBody:SetPoint("TOP", creditsDesc, "BOTTOM", 0, -10)
+    creditsBody:SetWidth(460)
+
+    local creditsContainer = CreateFrame("Frame", nil, viewCredits)
+    creditsContainer:SetSize(340, 220)
+    creditsContainer:SetPoint("TOP", creditsBody, "BOTTOM", 0, -20)
+
+    local guildTitle = creditsContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    guildTitle:SetPoint("TOP", creditsContainer, "TOP", 0, 0)
+    guildTitle:SetText(L["CREDITS_GUILD_TITLE"])
+    ApplyAccentFont(guildTitle)
+    guildTitle:SetTextColor(0.8, 0.9, 0.8)
+    guildTitle:SetSpacing(2)
+
+    local classColors = {
+        SHAMAN   = { 0.0, 0.44, 0.87 },
+        PRIEST   = { 1.0, 1.0, 1.0 },
+        PALADIN  = { 0.96, 0.55, 0.73 },
+        DEATHKNIGHT = { 0.77, 0.12, 0.23 },
+        MONK     = { 0.0, 1.0, 0.59 },
+        HUNTER   = { 0.67, 0.83, 0.45 },
+        WARLOCK  = { 0.53, 0.53, 0.93 },
+    }
+
+    local creditsList = {
+        { "Anoclos", "MONK", 28822 },     -- Pandaren death
+        { "Arkaboy", "SHAMAN" },
+        { "Eridion", "DEATHKNIGHT" },
+        { "Keendaal", "PALADIN" },
+        { "Kokushibo", "HUNTER", 3310 },  -- Troll death
+        { "Motecuhzoma", "MONK" },
+        { "Onykronos", "PRIEST" },
+        { "Unholykratox", "DEATHKNIGHT" },
+        { "Yendyuwu", "PRIEST" },
+        { "Zahaya", "SHAMAN" },
+    }
+
+    local columns = 2
+    local rowsPerCol = math.ceil(#creditsList / columns)
+    local colWidth = 150
+    local function PlayRaceDeath(soundRef)
+        if not soundRef then return end
+        local soundID = soundRef
+        if type(soundRef) == "string" then
+            if soundRef == "PANDAREN" then
+                soundID = (SOUNDKIT and SOUNDKIT.RACE_PANDAREN_MALE_DEATH) or nil
+            elseif soundRef == "TROLL" then
+                soundID = (SOUNDKIT and SOUNDKIT.RACE_TROLL_MALE_DEATH) or nil
+            else
+                soundID = tonumber(soundRef)
+            end
+        end
+        if soundID then PlaySound(soundID, "Master") end
+    end
+
+    for col = 1, columns do
+        local colFrame = CreateFrame("Frame", nil, creditsContainer)
+        local xOffset = (col == 1) and -80 or 80
+        colFrame:SetPoint("TOP", creditsContainer, "TOP", xOffset, -36)
+        colFrame:SetSize(colWidth, 200)
+        for i = 1, rowsPerCol do
+            local index = (col - 1) * rowsPerCol + i
+            local entry = creditsList[index]
+            if entry then
+                local name, classTag, raceSound = entry[1], entry[2], entry[3]
+                local btn = CreateFrame("Button", nil, colFrame)
+                btn:SetSize(colWidth, 18)
+                btn:SetPoint("TOP", colFrame, "TOP", 0, -(i - 1) * 18)
+                local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+                fs:SetPoint("CENTER")
+                fs:SetJustifyH("CENTER")
+                fs:SetText(name)
+                ApplyAccentFont(fs)
+                local clr = classColors[classTag] or { 0.9, 0.9, 0.9 }
+                fs:SetTextColor(clr[1], clr[2], clr[3])
+                if name == "Arkaboy" then
+                    fs:SetTextColor(0.0, 0.44, 0.87) -- ensure shaman blue
+                end
+                btn:SetScript("OnClick", function()
+                    PlayRaceDeath(raceSound)
+                end)
+            end
+        end
+    end
+
+    local farewell = CreateHelpText(viewCredits, L["CREDITS_FAREWELL"], creditsContainer, 12, true)
+    farewell:SetJustifyH("CENTER")
+    farewell:SetTextColor(0.53, 0.53, 0.93) -- Warlock purple
+    farewell:ClearAllPoints()
+    farewell:SetPoint("TOP", creditsContainer, "BOTTOM", 0, 8)
+    farewell:SetWidth(320)
+    do
+        local ffont, fsize, fflags = farewell:GetFont()
+        if ffont and fsize then
+            farewell:SetFont(ffont, math.max(10, fsize - 4), fflags)
+        end
+    end
 
     -- Créditos (En el sidebar abajo)
     local creditsBtn = CreateFrame("Button", nil, sidebar, "BackdropTemplate")
@@ -1582,8 +1690,8 @@ function LootHunter_CreateGUI()
     creditsBtn:SetNormalFontObject("GameFontHighlightSmall")
     creditsBtn:SetText(L["CREDITS"])
     local fs = creditsBtn:GetFontString()
-    if fs then fs:SetTextColor(0.5, 0.5, 0.5) end
-    creditsBtn:GetFontString():SetTextColor(0.5, 0.5, 0.5)
+    if fs then fs:SetTextColor(0.53, 0.53, 0.93) end -- Warlock purple
+    creditsBtn:GetFontString():SetTextColor(0.53, 0.53, 0.93)
     -- Eliminar feedback visual al click
     creditsBtn:SetPushedTextOffset(0, 0)
 
@@ -2037,20 +2145,18 @@ function LootHunter_RefreshUI()
             emptyHeader:SetText(hasItemsInDB and L["FILTER_EMPTY_TITLE"] or L["EMPTY_TITLE"])
             emptyHeader:Show() 
         end
-        if emptyQuote then 
+        if emptyQuote then
             emptyQuote:SetText(hasItemsInDB and L["FILTER_EMPTY_DESC"] or emptyQuote.selectedText)
-            if emptyQuote.baseFont then
-                local targetSize
-                if hasItemsInDB and emptyQuote.baseSize then
-                    targetSize = emptyQuote.baseSize
-                else
-                    targetSize = emptyQuote.smallFontSize or (emptyQuote.baseSize or 12) + 2
-                end
-                if targetSize then
-                    emptyQuote:SetFont(emptyQuote.baseFont, targetSize, emptyQuote.baseFlags)
-                end
+            local targetSize
+            if hasItemsInDB and emptyQuote.baseSize then
+                targetSize = emptyQuote.baseSize
+            else
+                targetSize = emptyQuote.smallFontSize or (emptyQuote.baseSize or 12) + 2
             end
-            emptyQuote:Show() 
+            if targetSize then
+                emptyQuote:SetFont(ACCENT_FONT, targetSize, emptyQuote.baseFlags)
+            end
+            emptyQuote:Show()
         end
         if logoIcon then logoIcon:Show() end
         if ghostIcon then ghostIcon:Show() end

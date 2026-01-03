@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 - Added won-row border in primary color and updated Help > Status text (won) plus epic purple title for Equipped.
 - Tooltip compare now refreshes when you press/hold Shift while hovering list items (no compare when Shift isn’t held).
 - /lh_drop and /lh_won previews play sounds on Master channel; DROP prompt only in raids; when multiple tracked drops happen together, “other won” alerts are suppressed to reduce noise.
+- Added scope control (“Raids/Dungeons/All”) to loot alerts and applied it to drop + won + lost alerts; default scope is now “All” and settings are normalized on load.
 
 ## 1.5.2-test
 - Added configurable coin reminder wait (30s-150s slider, default 150s) and debug logs showing the chosen value when timers start.
@@ -17,7 +18,7 @@ All notable changes to this project will be documented in this file.
 - Vendor items that are already on your list now show a subtle green name tint in merchant windows.
 - Vendor items you already have equipped now show a bright green name tint and an “already equipped” tooltip line.
 - Vendor tooltips for tracked items now include a green Loot Hunter header and localized “already on your list” line.
-- Fixed Spanish localization encoding (all accented characters render correctly again) and added a tip about adding vendor items via Shift+Click.
+- Fixed Spanish localization encoding (all accentuated characters render correctly again) and added a tip about adding vendor items via Shift+Click.
 - Moved debug/logging helpers into `Modules/Debug.lua` to isolate diagnostics and slash commands.
 - Added a confirmation popup before queuing for a heroic random dungeon, styled with the Blizzard alert icon
 
@@ -27,7 +28,7 @@ All notable changes to this project will be documented in this file.
 - Added colored chat formatting for DROP and other-won messages.
 - Raised UI frame strata so Loot Hunter stays above other addons.
 - Added boss-no-items chat option under Loot Alerts > Miscellaneous.
-- Improved coin reminder flow: drop blocks reminders; no-drop triggers after 30s.
+- Improved coin reminder flow: DROP blocks reminders; no-drop triggers after 30s.
 - Added chat output for pre-warning and coin reminder alerts.
 - Added `.pkgmeta` for CurseForge packaging.
 
