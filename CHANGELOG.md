@@ -2,11 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0
+- First stable release from the 1.5.x test branch.
+- Coin reminder flow finalized (post-drop timers stay pending; two-stage lost coin alerts intact).
+
 ## 1.5.3-test
 - Added won-row border in primary color and updated Help > Status text (won) plus epic purple title for Equipped.
 - Tooltip compare now refreshes when you press/hold Shift while hovering list items (no compare when Shift isn’t held).
 - /lh_drop and /lh_won previews play sounds on Master channel; DROP prompt only in raids; when multiple tracked drops happen together, “other won” alerts are suppressed to reduce noise.
 - Added scope control (“Raids/Dungeons/All”) to loot alerts and applied it to drop + won + lost alerts; default scope is now “All” and settings are normalized on load.
+- Coin reminder no longer blocks on DROP; it stays pending until you win/lose. Reminder alert now matches the preview (title+prompt with diamond icons).
+- Added optional mute for global channels (General/Trade/Defense/LFG) while inside raids (Misc setting).
+- Credits icon animation softened to a slow alpha pulse; fixed nil call to bonus roll visibility.
+
 
 ## 1.5.2-test
 - Added configurable coin reminder wait (30s-150s slider, default 150s) and debug logs showing the chosen value when timers start.
