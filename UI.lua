@@ -1295,6 +1295,33 @@ function LootHunter_CreateGUI()
     end)
     statusScrollChild:SetHeight(600)
 
+    local creditsScroll = CreateFrame("ScrollFrame", nil, viewCredits, "UIPanelScrollFrameTemplate")
+    creditsScroll:SetPoint("TOPLEFT", viewCredits, "TOPLEFT", 0, -5)
+    creditsScroll:SetPoint("BOTTOMRIGHT", viewCredits, "BOTTOMRIGHT", 0, 5)
+    if creditsScroll.ScrollBar then
+        creditsScroll.ScrollBar:ClearAllPoints()
+        creditsScroll.ScrollBar:SetPoint("TOPRIGHT", creditsScroll, "TOPRIGHT", -2, -16)
+        creditsScroll.ScrollBar:SetPoint("BOTTOMRIGHT", creditsScroll, "BOTTOMRIGHT", -2, 16)
+        creditsScroll.ScrollBar:Show()
+    end
+    local creditsScrollChild = CreateFrame("Frame", nil, creditsScroll)
+    creditsScrollChild:SetSize(1, 1)
+    creditsScroll:SetScrollChild(creditsScrollChild)
+    creditsScroll:SetScript("OnSizeChanged", function(self, w)
+        local width = w
+        if creditsScroll.ScrollBar and creditsScroll.ScrollBar:IsShown() then
+            width = math.max(1, w - 20)
+        end
+        creditsScrollChild:SetWidth(width)
+    end)
+    creditsScroll:SetScript("OnMouseWheel", function(self, delta)
+        local height = self:GetVerticalScrollRange()
+        local step = 20
+        local newValue = math.max(0, math.min(self:GetVerticalScroll() - (delta * step), height))
+        self:SetVerticalScroll(newValue)
+    end)
+    creditsScrollChild:SetHeight(1)
+
     local function SelectHelpView(view)
         viewGuide:Hide(); viewTips:Hide(); viewStatus:Hide(); viewBugs:Hide(); viewCredits:Hide()
         view:Show()
@@ -1382,6 +1409,24 @@ function LootHunter_CreateGUI()
         hm1:SetTextColor(pr + (1 - pr) * 0.5, pg + (1 - pg) * 0.5, pb + (1 - pb) * 0.5)
     end
     local tm1 = CreateHelpText(viewGuide, L["HELP_METHOD_1_DESC"], hm1, -5, false)
+    local function ColorGuideShortcuts(fs)
+        if not fs then return end
+        local text = fs:GetText()
+        if not text then return end
+        local pr, pg, pb = GetPrimaryColor()
+        local function clamp(v) return math.max(0, math.min(255, math.floor((v or 0) * 255))) end
+        local colorCode = string.format("|cff%02x%02x%02x", clamp(pr), clamp(pg), clamp(pb))
+        local resetCode = "|r"
+        local function wrapShortcut(pattern)
+            text = text:gsub(pattern, function(match)
+                return colorCode .. match .. resetCode
+            end)
+        end
+        wrapShortcut("Shift%+J")
+        wrapShortcut("Shift%+Click")
+        fs:SetText(text)
+    end
+    ColorGuideShortcuts(tm1)
     local btnGuideJournal = CreateFrame("Button", nil, viewGuide, "BackdropTemplate")
     btnGuideJournal:SetSize(160, 25)
     btnGuideJournal:SetPoint("TOPLEFT", tm1, "BOTTOMLEFT", 0, -10)
@@ -1567,23 +1612,39 @@ function LootHunter_CreateGUI()
     end)
 
     -- 5. VISTA CREDITOS
-    local creditsTitle = CreateHelpText(viewCredits, L["HELP_CREDITS_TITLE"], nil, -4, true)
+    local creditsTitle = CreateHelpText(creditsScrollChild, L["HELP_CREDITS_TITLE"], nil, -4, true)
     ApplySubtitleStyle(creditsTitle)
-    local creditsDesc = CreateHelpText(viewCredits, L["CREDITS_HEADING"], creditsTitle, -10, true)
-    creditsDesc:SetJustifyH("CENTER")
-    creditsDesc:SetTextColor(0.9, 0.9, 0.9)
-    creditsDesc:ClearAllPoints()
-    creditsDesc:SetPoint("TOP", creditsTitle, "BOTTOM", 0, -10)
-    creditsDesc:SetWidth(460)
+    local creditsArt = creditsScrollChild:CreateTexture(nil, "ARTWORK")
+    creditsArt:SetSize(165, 168)
+    creditsArt:SetPoint("TOP", creditsTitle, "BOTTOM", 0, -10)
+    creditsArt:SetTexture(ADDON_FOLDER .. "Textures\\icon_credits.tga")
+    do
+        -- Keep the icon size fixed; use only a soft alpha pulse.
+        local pulse = creditsArt:CreateAnimationGroup()
+        pulse:SetLooping("REPEAT")
+        local fadeIn = pulse:CreateAnimation("Alpha")
+        fadeIn:SetOrder(1)
+        fadeIn:SetDuration(1.4)
+        fadeIn:SetFromAlpha(0.85)
+        fadeIn:SetToAlpha(1)
+        fadeIn:SetSmoothing("IN_OUT")
+        local fadeOut = pulse:CreateAnimation("Alpha")
+        fadeOut:SetOrder(2)
+        fadeOut:SetDuration(1.4)
+        fadeOut:SetFromAlpha(1)
+        fadeOut:SetToAlpha(0.85)
+        fadeOut:SetSmoothing("IN_OUT")
+        pulse:Play()
+    end
 
-    local creditsBody = CreateHelpText(viewCredits, L["CREDITS_DESC"], creditsDesc, -10, false)
+    local creditsBody = CreateHelpText(creditsScrollChild, L["CREDITS_DESC"], creditsArt, -10, false)
     creditsBody:SetJustifyH("CENTER")
     creditsBody:ClearAllPoints()
-    creditsBody:SetPoint("TOP", creditsDesc, "BOTTOM", 0, -10)
+    creditsBody:SetPoint("TOP", creditsArt, "BOTTOM", 0, -10)
     creditsBody:SetWidth(460)
 
-    local creditsContainer = CreateFrame("Frame", nil, viewCredits)
-    creditsContainer:SetSize(340, 220)
+    local creditsContainer = CreateFrame("Frame", nil, creditsScrollChild)
+    creditsContainer:SetSize(340, 150)
     creditsContainer:SetPoint("TOP", creditsBody, "BOTTOM", 0, -20)
 
     local guildTitle = creditsContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -1638,7 +1699,7 @@ function LootHunter_CreateGUI()
         local colFrame = CreateFrame("Frame", nil, creditsContainer)
         local xOffset = (col == 1) and -80 or 80
         colFrame:SetPoint("TOP", creditsContainer, "TOP", xOffset, -36)
-        colFrame:SetSize(colWidth, 200)
+        colFrame:SetSize(colWidth, 130)
         for i = 1, rowsPerCol do
             local index = (col - 1) * rowsPerCol + i
             local entry = creditsList[index]
@@ -1664,11 +1725,14 @@ function LootHunter_CreateGUI()
         end
     end
 
-    local farewell = CreateHelpText(viewCredits, L["CREDITS_FAREWELL"], creditsContainer, 12, true)
+    local farewellBtn = CreateFrame("Button", nil, creditsScrollChild)
+    farewellBtn:SetPoint("TOP", creditsContainer, "BOTTOM", 0, 2)
+    farewellBtn:SetWidth(320)
+    local farewell = CreateHelpText(farewellBtn, L["CREDITS_FAREWELL"], nil, 0, true)
     farewell:SetJustifyH("CENTER")
-    farewell:SetTextColor(0.53, 0.53, 0.93) -- Warlock purple
+    farewell:SetTextColor(1, 1, 1)
     farewell:ClearAllPoints()
-    farewell:SetPoint("TOP", creditsContainer, "BOTTOM", 0, 8)
+    farewell:SetPoint("CENTER", farewellBtn, "CENTER", 0, 0)
     farewell:SetWidth(320)
     do
         local ffont, fsize, fflags = farewell:GetFont()
@@ -1676,6 +1740,26 @@ function LootHunter_CreateGUI()
             farewell:SetFont(ffont, math.max(10, fsize - 4), fflags)
         end
     end
+    farewellBtn:SetHeight((farewell:GetStringHeight() or 14) + 6)
+    farewellBtn:SetScript("OnClick", function()
+        PlaySound(9100, "Master")
+    end)
+
+    local function RefreshCreditsHeight()
+        if not creditsScroll or not creditsScrollChild then return end
+        local top = creditsTitle:GetTop() or 0
+        local bottom = (farewellBtn and farewellBtn:GetBottom()) or (farewell and farewell:GetBottom()) or 0
+        local totalHeight = (top - bottom) + 20
+        local minHeight = creditsScroll:GetHeight() or 0
+        creditsScrollChild:SetHeight(math.max(totalHeight, minHeight))
+    end
+
+    creditsScroll:SetScript("OnSizeChanged", function(self, w)
+        creditsScrollChild:SetWidth(w)
+        RefreshCreditsHeight()
+    end)
+    viewCredits:SetScript("OnShow", RefreshCreditsHeight)
+    C_Timer.After(0, RefreshCreditsHeight)
 
     -- Créditos (En el sidebar abajo)
     local creditsBtn = CreateFrame("Button", nil, sidebar, "BackdropTemplate")
@@ -1690,14 +1774,15 @@ function LootHunter_CreateGUI()
     creditsBtn:SetNormalFontObject("GameFontHighlightSmall")
     creditsBtn:SetText(L["CREDITS"])
     local fs = creditsBtn:GetFontString()
-    if fs then fs:SetTextColor(0.53, 0.53, 0.93) end -- Warlock purple
-    creditsBtn:GetFontString():SetTextColor(0.53, 0.53, 0.93)
+    if fs then
+        fs:SetTextColor(0.53, 0.53, 0.93) -- Warlock purple
+    end
     -- Eliminar feedback visual al click
     creditsBtn:SetPushedTextOffset(0, 0)
 
     creditsBtn:SetScript("OnClick", function()
-        PlaySound(9100, "Master")
     end)
+    creditsBtn:Hide()
 
     -- PANEL CONFIG
     panelConfig = CreateFrame("Frame", nil, mainFrame)
@@ -2224,7 +2309,8 @@ function LootHunter_RefreshUI()
 
     for i, entry in ipairs(sortedList) do
         local info = entry.data
-        local bossText = entry.displayBoss or info.boss or L["UNKNOWN_SOURCE"]
+        local bossText = entry.displayBoss or info.boss or ""
+        if bossText == L["UNKNOWN_SOURCE"] then bossText = "" end
 
         -- Actualizar información del item si ya está disponible en caché (Loading fix)
         local iName, iLink, _, _, _, _, _, _, iEquipLoc, iIcon = GetItemInfo(entry.id)

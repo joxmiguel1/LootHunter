@@ -12,6 +12,9 @@ local ResolveAllUnknownSources
 local LogCoinDebug = addonTable.LogCoinDebug or function() end
 local LogDebug = addonTable.LogDebug or function() end
 local GetCurrentSpecName
+local IsScopeAllowed
+local IsBonusRollWindowVisible
+local UpdateRaidChatFilter
 local MOPTierSelected = false
 local ShowDropAlert
 local SetupHeroicQueueConfirm
@@ -386,6 +389,7 @@ local function InitializeSettings()
         },
         misc = {
             heroicQueueConfirm = true,
+            muteRaidChannels = false,
         },
         general = {
             windowsLocked = true,
@@ -421,6 +425,57 @@ local function InitializeSettings()
     end
 end
 
+local raidChatFilterActive = false
+local function ShouldMuteChannelName(channelName)
+    if not channelName or channelName == "" then return false end
+    local name = string.lower(channelName)
+    name = name:gsub("^%d+%.%s*", "")
+    local tokens = {
+        "general",
+        "trade",
+        "comercio",
+        "defense",
+        "defensa",
+        "looking",
+        "lfg",
+        "buscar",
+    }
+    for _, token in ipairs(tokens) do
+        if name:find(token, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function RaidChannelFilter(self, event, msg, author, language, channelName, ...)
+    if not raidChatFilterActive then return false end
+    local inInstance, instanceType = IsInInstance()
+    if not (inInstance and instanceType == "raid") then
+        return false
+    end
+    if ShouldMuteChannelName(channelName) then
+        return true
+    end
+    return false
+end
+
+UpdateRaidChatFilter = function()
+    local shouldMute = false
+    if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.misc and LootHunterDB.settings.misc.muteRaidChannels then
+        local inInstance, instanceType = IsInInstance()
+        shouldMute = inInstance and instanceType == "raid"
+    end
+    if shouldMute and not raidChatFilterActive then
+        ChatFrame_AddMessageEventFilter("CHAT_MSG_CHANNEL", RaidChannelFilter)
+        raidChatFilterActive = true
+    elseif (not shouldMute) and raidChatFilterActive then
+        ChatFrame_RemoveMessageEventFilter("CHAT_MSG_CHANNEL", RaidChannelFilter)
+        raidChatFilterActive = false
+    end
+end
+addonTable.UpdateRaidChatFilter = UpdateRaidChatFilter
+
 local ValidateAddonAssets
 local MigrateSpecIDs
 local function HandleAddonLoaded(event, arg1)
@@ -444,7 +499,7 @@ local function HandleAddonLoaded(event, arg1)
         return
     end
     if arg1 ~= addonName then return end
-    addonTable.version = GetAddOnMetadata(addonName, "Version") or "1.0"
+    addonTable.version = GetAddOnMetadata(addonName, "Version") or "v1.0"
 
     if LootHunterDB == nil then LootHunterDB = {} end
 
@@ -498,6 +553,7 @@ local function HandleAddonLoaded(event, arg1)
     -- CreateFloatingButton() -- Reemplazado por el icono del minimapa
     BuildStaticDB()
     SetupHeroicQueueConfirm()
+    UpdateRaidChatFilter()
 
     hooksecurefunc("HandleModifiedItemClick", function(itemLink)
         if not IsShiftKeyDown() or addonTable.SuppressAddItem then return end
@@ -919,12 +975,15 @@ local function MarkDropSeen(itemID, reason)
     local entry = PendingCoinReminders[key]
     if not entry then return end
     entry.dropSeen = true
-    entry.blockCoin = true
     entry.dropSeenAt = GetTime()
-    LogCoinDebug(string.format("Drop seen for item %d (reason: %s) - blocking coin reminder.", itemID, reason or "unknown"))
+    LogCoinDebug(string.format("Drop seen for item %d (reason: %s). Coin reminder stays pending until resolved.", itemID, reason or "unknown"))
 end
 
 local function ShowDropAlert(itemID, itemData)
+    local alertSettings = LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts
+    if not alertSettings or alertSettings.itemSeen == false then
+        return
+    end
     if not itemID and itemData and itemData.id then
         itemID = itemData.id
     end
@@ -969,7 +1028,7 @@ local function ShowDropAlert(itemID, itemData)
     local showPrompt = (instanceType == "raid")
     local dropPrompt = showPrompt and CreateGradient(L["DROP_ALERT_PROMPT"], 1, 0.85, 0.35, 1, 0.75, 0) or nil
     local alertText = dropHeader .. "\n" .. dropItemLine .. (dropPrompt and ("\n" .. dropPrompt) or "")
-    if not IsScopeAllowed(LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts and LootHunterDB.settings.lootAlerts.lostAlertScope) then
+    if not IsScopeAllowed(alertSettings.lostAlertScope) then
         return
     end
     EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_PRIMARY, function()
@@ -1039,15 +1098,15 @@ end
 local function ProcessCoinReminder(key)
     local entry = PendingCoinReminders[key]
     if not entry or not CurrentCharDB then return end
-    if entry.dropSeen then
-        LogCoinDebug(string.format("Coin reminder for %s skipped because drop was seen.", entry.boss or "Unknown"))
+    if entry.blockCoin then
+        LogCoinDebug(string.format("Coin reminder for %s skipped because coin is blocked.", entry.boss or "Unknown"))
         return
     end
     PendingCoinReminders[key] = nil
     local stillMissing = {}
     for _, id in ipairs(entry.items) do
         local data = CurrentCharDB[id]
-        if data and data.status == 0 then
+        if data and data.status ~= 2 then
             table.insert(stillMissing, data)
         end
     end
@@ -1056,9 +1115,6 @@ local function ProcessCoinReminder(key)
         return 
     end
     if LootHunterDB.settings.coinReminder.visualAlert then
-        local rawText = string.format(L["COIN_REMINDER_RAID_MSG"], entry.boss)
-        local visualText = (addonTable.CreateGradient and addonTable.CreateGradient(rawText, 1, 0.85, 0.35, 1, 0.75, 0)) or rawText
-        local msg = ICON_DIAMOND .. visualText .. ICON_DIAMOND
         local chatFmt = L["COIN_REMINDER_RAID_CHAT"] or L["COIN_REMINDER_RAID_MSG"]
         local chatMsg = string.format(chatFmt, entry.boss)
         if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
@@ -1066,9 +1122,18 @@ local function ProcessCoinReminder(key)
         else
             print(chatMsg)
         end
+
+        local titleRaw = L["COIN_REMINDER_ALERT_TITLE"] or "Your loot didn't drop!"
+        local promptRaw = L["COIN_REMINDER_ALERT_PROMPT"] or "Use your coin now!"
+        local title = (addonTable.CreateGradient and addonTable.CreateGradient(titleRaw, 1, 0.85, 0.35, 1, 0.75, 0)) or titleRaw
+        local prompt = (addonTable.CreateGradient and addonTable.CreateGradient(promptRaw, 1, 0.85, 0.35, 1, 0.75, 0)) or promptRaw
+        local msg = string.format("%s %s %s\n%s", ICON_DIAMOND, title, ICON_DIAMOND, prompt)
+
         EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_SECONDARY, function()
             if addonTable.ShowAlert then
                 addonTable.ShowAlert(msg, 1, 0.85, 0)
+            else
+                print(msg)
             end
             if addonTable.FlashScreen then
                 addonTable.FlashScreen("YELLOW")
@@ -1092,7 +1157,7 @@ end
 local function StartCoinReminderTimer(key, reason, delay)
     local entry = PendingCoinReminders[key]
     if not entry or entry.timerStarted then return end
-    if entry.dropSeen or entry.blockCoin then
+    if entry.blockCoin then
         LogCoinDebug(string.format("Coin timer blocked for %s (reason: %s).", entry.boss or "Unknown", reason or "unknown"))
         return
     end
@@ -1111,8 +1176,8 @@ end
 local function StartTwoStageCoinReminder(key)
     local entry = PendingCoinReminders[key]
     if not entry or entry.timerStarted then return end
-    if entry.dropSeen then
-        LogCoinDebug(string.format("Two-stage reminder for %s blocked because drop was seen.", entry.boss or "Unknown"))
+    if entry.blockCoin then
+        LogCoinDebug(string.format("Two-stage reminder for %s blocked because coin is blocked.", entry.boss or "Unknown"))
         return
     end
     local waitWindow = GetCoinReminderWait()
@@ -1166,8 +1231,8 @@ local function ActivatePendingForBonusRoll(reason)
     for key, entry in pairs(PendingCoinReminders) do
         if entry and not entry.timerStarted then
             local waitWindow = GetCoinReminderWait()
-            if entry.dropSeen then
-                LogCoinDebug(string.format("Bonus roll activation ignored for %s because drop was seen.", entry.boss or "Unknown"))
+            if entry.blockCoin then
+                LogCoinDebug(string.format("Bonus roll activation ignored for %s because coin is blocked.", entry.boss or "Unknown"))
             elseif entry.deathTime and (GetTime() - entry.deathTime) >= waitWindow then
                 LogCoinDebug(string.format("Bonus roll activation triggering reminder for %s.", entry.boss or "Unknown"))
                 StartCoinReminderTimer(key, "bonus_roll_activate", 0)
@@ -1221,7 +1286,7 @@ local function HandleUnitAura(event, unit)
         ActivatePendingForBonusRoll("bonus_roll_buff")
     end
 end
-local function IsBonusRollWindowVisible()
+function IsBonusRollWindowVisible()
     local frame = _G.BonusRollFrame
     return frame and frame:IsShown()
 end
@@ -1326,8 +1391,8 @@ local function ScheduleCoinReminder(encounterID, bossName, forceRaid, forcePreWa
     C_Timer.After(reminderDelay, function()
         local entry = PendingCoinReminders[key]
         if not entry then return end
-        if entry.dropSeen then
-            LogCoinDebug(string.format("No-drop timer skipped for %s because drop was seen.", entry.boss or "Unknown"))
+        if entry.blockCoin then
+            LogCoinDebug(string.format("No-drop timer skipped for %s because coin is blocked.", entry.boss or "Unknown"))
             return
         end
         if not IsBonusRollWindowVisible() then
@@ -1478,7 +1543,13 @@ local function ShouldTriggerOtherWon(itemID)
     return within
 end
 
-local function IsScopeAllowed(scope)
+local function HandleInstanceChange(event)
+    if UpdateRaidChatFilter then
+        UpdateRaidChatFilter()
+    end
+end
+
+IsScopeAllowed = function(scope)
     scope = scope or "ALL"
     if scope == "ALL" then return true end
     local inInstance, instanceType = IsInInstance()
@@ -2042,8 +2113,9 @@ SetupHeroicQueueConfirm = function()
     if hooksecurefunc and LFDQueueFrame_SetType then
         hooksecurefunc("LFDQueueFrame_SetType", function(id, typeID)
             if id then
-                currentRandomDungeonID = id
-                local n = GetLFGDungeonInfo and select(1, GetLFGDungeonInfo(id))
+                local dungeonID = (type(id) == "number") and id or nil
+                currentRandomDungeonID = dungeonID or id
+                local n = (dungeonID and GetLFGDungeonInfo and select(1, GetLFGDungeonInfo(dungeonID))) or nil
                 currentRandomDungeonName = n or nil
                 HeroicLog(string.format("SetType: id=%s name=%s typeID=%s", tostring(id), tostring(currentRandomDungeonName), tostring(typeID)))
             end
@@ -2123,6 +2195,8 @@ local eventHandlers = {
     PLAYER_TALENT_UPDATE = HandleSpecChange,
     MERCHANT_SHOW = HandleMerchantEvent,
     MERCHANT_UPDATE = HandleMerchantEvent,
+    PLAYER_ENTERING_WORLD = HandleInstanceChange,
+    ZONE_CHANGED_NEW_AREA = HandleInstanceChange,
 }
 frame:SetScript("OnEvent", function(self, event, arg1, ...)
     if eventHandlers[event] then
@@ -2151,6 +2225,8 @@ frame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 frame:RegisterEvent("PLAYER_TALENT_UPDATE")
 frame:RegisterEvent("MERCHANT_SHOW")
 frame:RegisterEvent("MERCHANT_UPDATE")
+frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 -- === CACHE DE LOOT (EJ) ===
 local LootSourceCache = {}
 local StaticDBBuilt = false

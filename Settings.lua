@@ -1001,8 +1001,14 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     -- Miscellaneous (placed last in sidebar)
     local miscPanel = Settings:CreateCategory("Miscellaneous", L["SETTING_MISC_TITLE"])
     CreateDescription(miscPanel, L["SETTING_MISC_DESC"])
-    Settings:CreateCheckbox(miscPanel, "lootAlerts.bossNoItems", L["SETTING_ALERTS_BOSS_NONE_LABEL"], L["SETTING_ALERTS_BOSS_NONE_DESC"])
     Settings:CreateCheckbox(miscPanel, "misc.heroicQueueConfirm", L["SETTING_MISC_HEROIC_LABEL"], L["SETTING_MISC_HEROIC_DESC"])
+    local muteRaidCb = Settings:CreateCheckbox(miscPanel, "misc.muteRaidChannels", L["SETTING_MISC_MUTE_RAID_LABEL"], L["SETTING_MISC_MUTE_RAID_DESC"])
+    if muteRaidCb and muteRaidCb.HookScript then
+        muteRaidCb:HookScript("OnClick", function()
+            if addonTable.UpdateRaidChatFilter then addonTable.UpdateRaidChatFilter() end
+        end)
+    end
+    Settings:CreateCheckbox(miscPanel, "lootAlerts.bossNoItems", L["SETTING_ALERTS_BOSS_NONE_LABEL"], L["SETTING_ALERTS_BOSS_NONE_DESC"])
 
     -- Seleccionar la primera categoria por defecto
     Settings:SelectCategory(_G["LootHunter_SettingsCategory_CoinReminder"])
