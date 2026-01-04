@@ -377,14 +377,14 @@ local function InitializeSettings()
             visualAlert = true,
             soundEnabled = true,
             soundFile = 12867, -- ID de sonido por defecto del codigo original
-            reminderDelay = COIN_REMINDER_MAX_WAIT,
+            reminderDelay = 60,
         },
         lootAlerts = {
             itemWon = true,
             itemSeen = true,
             otherWonSound = true,
             lostAlertEnabled = true,
-            lostAlertScope = "ALL",
+            lostAlertScope = "RAID",
             bossNoItems = false,
         },
         misc = {
@@ -420,7 +420,7 @@ local function InitializeSettings()
         local scope = LootHunterDB.settings.lootAlerts.lostAlertScope
         local valid = { ALL = true, RAID = true, DUNGEON = true }
         if not valid[scope] then
-            LootHunterDB.settings.lootAlerts.lostAlertScope = "ALL"
+            LootHunterDB.settings.lootAlerts.lostAlertScope = "RAID"
         end
     end
 end

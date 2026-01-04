@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## v1.0 
 - First stable release from the 1.5.x test branch.
 - Coin reminder flow finalized (post-drop timers stay pending; two-stage lost coin alerts intact).
+- Defaults tuned: loot alerts now default to Raids-only, and coin reminder wait is 60s.
 
 ## 1.5.3-test
 - Added won-row border in primary color and updated Help > Status text (won) plus epic purple title for Equipped.
