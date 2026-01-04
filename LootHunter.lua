@@ -2592,7 +2592,7 @@ function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
             CurrentCharDB[id].boss = source
         end
         CurrentCharDB[id].isHeroic = isHeroic
-        -- Si no tienen source establecido aún, intentar obtenerlo
+        -- Si no tienen source establecido aún, intentar obtenerlo 
         if not CurrentCharDB[id].boss or CurrentCharDB[id].boss == L["UNKNOWN_SOURCE"] then
             CurrentCharDB[id].boss = source
         end

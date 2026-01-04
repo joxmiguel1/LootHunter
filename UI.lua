@@ -2,7 +2,7 @@ local addonName, addonTable = ...
 local L = addonTable.L
 local CreateGradient = addonTable.CreateGradient or function(text) return text end
 
--- Variables locales de UI
+-- Variables locales de UI -
 local mainFrame = nil
 local floatBtn = nil
 local panelList, panelHelp, panelConfig, panelLog = nil, nil, nil, nil

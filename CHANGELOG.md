@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## v1.0
+## v1.0 
 - First stable release from the 1.5.x test branch.
 - Coin reminder flow finalized (post-drop timers stay pending; two-stage lost coin alerts intact).
 

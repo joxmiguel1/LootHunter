@@ -2,7 +2,7 @@
 
 ### ¡Nunca más te quedes sin tu BiS!
 
-***
+*** 
 
 &nbsp;
 

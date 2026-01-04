@@ -42,7 +42,7 @@ local function ShowReloadDialog()
     StaticPopup_Show("LOOTHUNTER_RELOAD_UI")
 end
 
--- Esta funcion la llama UI.lua para construir el panel de configuracion dentro de una pesta?a
+--  Esta funcion la llama UI.lua para construir el panel de configuracion dentro de una pesta?a
 function addonTable.BuildSettingsPanelInto(parentFrame)
     -- En llamadas posteriores, solo refrescar valores, no reconstruir
     if isBuilt then
