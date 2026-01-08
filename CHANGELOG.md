@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.2
+- Fixed bonus roll loot messages (self/other) so tracked items won via bonus rolls now trigger the WIN alert and status update.
+
 ## v1.0 
 - First stable release from the 1.5.x test branch.
 - Coin reminder flow finalized (post-drop timers stay pending; two-stage lost coin alerts intact).

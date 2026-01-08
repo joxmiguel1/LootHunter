@@ -1469,6 +1469,8 @@ local function BuildSelfLootPatterns()
         LOOT_ITEM_PUSHED_SELF,
         LOOT_ITEM_SELF,
         LOOT_ITEM_SELF_MULTIPLE,
+        LOOT_ITEM_BONUS_ROLL_SELF,
+        LOOT_ITEM_BONUS_ROLL_SELF_MULTIPLE,
     }
     for _, fmt in ipairs(formats) do
         if type(fmt) == "string" and fmt ~= "" then
@@ -1485,6 +1487,8 @@ local function BuildOtherLootPatterns()
         LOOT_ITEM_PUSHED,
         LOOT_ITEM,
         LOOT_ITEM_MULTIPLE,
+        LOOT_ITEM_BONUS_ROLL_OTHER,
+        LOOT_ITEM_BONUS_ROLL_OTHER_MULTIPLE,
     }
     for _, fmt in ipairs(formats) do
         if type(fmt) == "string" and fmt ~= "" then
