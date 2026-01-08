@@ -2,8 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.3 HOTFIX
+- OTHER_WON no longer triggers when another player gets a tracked item via their own bonus roll; only shared /roll losses fire the red alert.
+
 ## v1.0.2
 - Fixed bonus roll loot messages (self/other) so tracked items won via bonus rolls now trigger the WIN alert and status update.
+- Suppressed OTHER_WON alerts when another player receives an item from their own bonus roll (only fires when a shared /roll is lost).
 
 ## v1.0 
 - First stable release from the 1.5.x test branch.

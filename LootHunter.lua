@@ -1484,16 +1484,17 @@ end
 local function BuildOtherLootPatterns()
     local patterns = {}
     local formats = {
-        LOOT_ITEM_PUSHED,
-        LOOT_ITEM,
-        LOOT_ITEM_MULTIPLE,
-        LOOT_ITEM_BONUS_ROLL_OTHER,
-        LOOT_ITEM_BONUS_ROLL_OTHER_MULTIPLE,
+        { fmt = LOOT_ITEM_PUSHED, bonus = false },
+        { fmt = LOOT_ITEM, bonus = false },
+        { fmt = LOOT_ITEM_MULTIPLE, bonus = false },
+        { fmt = LOOT_ITEM_BONUS_ROLL_OTHER, bonus = true },
+        { fmt = LOOT_ITEM_BONUS_ROLL_OTHER_MULTIPLE, bonus = true },
     }
-    for _, fmt in ipairs(formats) do
+    for _, entry in ipairs(formats) do
+        local fmt = entry.fmt
         if type(fmt) == "string" and fmt ~= "" then
             local pattern = "^" .. fmt:gsub("%%s", "(.-)", 1):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
-            table.insert(patterns, pattern)
+            table.insert(patterns, { pattern = pattern, isBonusRoll = entry.bonus })
         end
     end
     return patterns
@@ -1592,6 +1593,7 @@ local function HandleChatLoot(event, msg, ...)
     if not CurrentCharDB or type(msg) ~= "string" then return end
     local itemLink, playerName
     local isMine = false
+    local lootViaBonusRoll = false
     -- Comprueba si el jugador mismo despojó el objeto
     for _, pattern in ipairs(selfLootPatterns) do
         local capturedItemLink = msg:match(pattern)
@@ -1604,14 +1606,22 @@ local function HandleChatLoot(event, msg, ...)
     if not itemLink then
         -- Comprueba si alguien más despojó el objeto
         for _, pattern in ipairs(otherLootPatterns) do
-            local capturedPlayer, capturedItemLink2 = msg:match(pattern)
+            local capturedPlayer, capturedItemLink2 = msg:match(pattern.pattern)
             if capturedPlayer and capturedItemLink2 then
                 playerName = capturedPlayer
                 itemLink = capturedItemLink2
                 isMine = (playerName == UnitName("player"))
+                lootViaBonusRoll = pattern.isBonusRoll and not isMine
                 break
             end
         end
+    end
+    if lootViaBonusRoll then
+        -- Si otro obtiene el item por bonus roll, no mostramos OTHER_WON (no hay /roll compartido).
+        if LogAlertDebug then
+            LogAlertDebug(string.format("Skipping OTHER_WON for bonus roll loot from %s: %s", tostring(playerName or "?"), tostring(itemLink or "?")))
+        end
+        return
     end
     if not itemLink then return end
     local id = tonumber(string.match(itemLink, "item:(%d+):"))
