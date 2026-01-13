@@ -212,6 +212,7 @@ end
 
 local ADDON_FOLDER = ResolveAddonFolder()
 local TEX_ARROW = ADDON_FOLDER .. "Textures\\icon_arrow.tga"
+local DELETE_ICON_PATH = ADDON_FOLDER .. "Textures\\icon_delete.tga"
 
 -- === SISTEMA DE ALERTAS DE TEXTO ===
 local alertMsgFrame = CreateFrame("MessageFrame", "LootHunterMsgFrame", UIParent)
@@ -664,6 +665,42 @@ function LootHunter_CreateGUI()
             end
         end
     end)
+
+    local helpTopBtn = CreateFrame("Button", nil, mainFrame)
+    helpTopBtn:SetSize(16, 16)
+    helpTopBtn:SetPoint("LEFT", configBtn, "RIGHT", 8, 0)
+    helpTopBtn:SetNormalTexture(ADDON_FOLDER .. "Textures\\icon_help_top.tga")
+    helpTopBtn:SetPushedTexture(ADDON_FOLDER .. "Textures\\icon_help_top.tga")
+    helpTopBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    helpTopBtn:SetFrameLevel(mainFrame:GetFrameLevel() + 6)
+    local helpTopNormal = helpTopBtn:GetNormalTexture()
+    if helpTopNormal then helpTopNormal:SetAllPoints() end
+    local helpTopPushed = helpTopBtn:GetPushedTexture()
+    if helpTopPushed then helpTopPushed:SetAllPoints() end
+    helpTopBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(L["TAB_HELP"] or "Help", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    helpTopBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    helpTopBtn.pulse = helpTopBtn:CreateTexture(nil, "OVERLAY")
+    helpTopBtn.pulse:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+    helpTopBtn.pulse:SetBlendMode("ADD")
+    helpTopBtn.pulse:SetPoint("CENTER", 0, 0)
+    helpTopBtn.pulse:SetSize(34, 34)
+    helpTopBtn.pulse:Hide()
+    helpTopBtn.pulseAnim = helpTopBtn.pulse:CreateAnimationGroup()
+    helpTopBtn.pulseAnim:SetLooping("REPEAT")
+    local topFadeIn = helpTopBtn.pulseAnim:CreateAnimation("Alpha")
+    topFadeIn:SetFromAlpha(0.2)
+    topFadeIn:SetToAlpha(1)
+    topFadeIn:SetDuration(0.8)
+    topFadeIn:SetOrder(1)
+    local topFadeOut = helpTopBtn.pulseAnim:CreateAnimation("Alpha")
+    topFadeOut:SetFromAlpha(1)
+    topFadeOut:SetToAlpha(0.2)
+    topFadeOut:SetDuration(0.8)
+    topFadeOut:SetOrder(2)
 
     local closeBtn = CreateFrame("Button", nil, mainFrame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -10, -7)
@@ -1223,6 +1260,20 @@ function LootHunter_CreateGUI()
         if ToggleEncounterJournal then
             ToggleEncounterJournal()
         end
+    end)
+
+    local emptyHelpButton = CreateFrame("Button", nil, emptyContainer)
+    emptyHelpButton:SetPoint("TOP", emptyJournalButton, "BOTTOM", 0, -10)
+    emptyHelpButton:SetSize(260, 18)
+    local emptyHelpLabel = emptyHelpButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    emptyHelpLabel:SetPoint("CENTER")
+    emptyHelpLabel:SetText(L["EMPTY_HELP_HINT"] or "Need help? Open the user guide.")
+    emptyHelpLabel:SetTextColor(0.41, 0.78, 1, 1)
+    emptyHelpButton:SetScript("OnEnter", function()
+        emptyHelpLabel:SetTextColor(0.78, 0.92, 1, 1)
+    end)
+    emptyHelpButton:SetScript("OnLeave", function()
+        emptyHelpLabel:SetTextColor(0.41, 0.78, 1, 1)
     end)
 
     listScrollFrame = CreateFrame("ScrollFrame", nil, panelList, "UIPanelScrollFrameTemplate")
@@ -2018,19 +2069,23 @@ function LootHunter_CreateGUI()
     end)
     helpBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     local function StopHelpPulse()
-        if helpBtn and helpBtn.pulseAnim then
-            helpBtn.pulseAnim:Stop()
-        end
-        if helpBtn and helpBtn.pulse then
-            helpBtn.pulse:Hide()
-        end
+        if helpBtn and helpBtn.pulseAnim then helpBtn.pulseAnim:Stop() end
+        if helpBtn and helpBtn.pulse then helpBtn.pulse:Hide() end
+        if helpTopBtn and helpTopBtn.pulseAnim then helpTopBtn.pulseAnim:Stop() end
+        if helpTopBtn and helpTopBtn.pulse then helpTopBtn.pulse:Hide() end
     end
     local function StartHelpPulse()
-        if not (helpBtn and helpBtn.pulse and helpBtn.pulseAnim) then return end
         local pr, pg, pb = GetPrimaryColor()
-        helpBtn.pulse:SetVertexColor(pr, pg, pb, 1)
-        helpBtn.pulse:Show()
-        helpBtn.pulseAnim:Play()
+        if helpBtn and helpBtn.pulse and helpBtn.pulseAnim then
+            helpBtn.pulse:SetVertexColor(pr, pg, pb, 1)
+            helpBtn.pulse:Show()
+            helpBtn.pulseAnim:Play()
+        end
+        if helpTopBtn and helpTopBtn.pulse and helpTopBtn.pulseAnim then
+            helpTopBtn.pulse:SetVertexColor(pr, pg, pb, 1)
+            helpTopBtn.pulse:Show()
+            helpTopBtn.pulseAnim:Play()
+        end
     end
 
     addonTable.SelectTab = function(id)
@@ -2039,6 +2094,7 @@ function LootHunter_CreateGUI()
         tab1:Enable(); tab3:Enable()
         helpBtn:SetButtonState("NORMAL")
         helpBtn.active:Hide()
+        if helpTopBtn then helpTopBtn:SetButtonState("NORMAL") end
         SetTabState(tab1, false)
         SetTabState(tab3, false)
         if id == 1 then
@@ -2046,6 +2102,7 @@ function LootHunter_CreateGUI()
             ApplyAccentFontRecursive(panelList)
         elseif id == 2 then
             panelHelp:Show(); helpBtn:SetButtonState("PUSHED"); helpBtn.active:Show()
+            if helpTopBtn then helpTopBtn:SetButtonState("PUSHED") end
             ApplyAccentFontRecursive(panelHelp)
             if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.general and not LootHunterDB.settings.general.helpSeen then
                 LootHunterDB.settings.general.helpSeen = true
@@ -2069,7 +2126,19 @@ function LootHunter_CreateGUI()
     end
     tab1:SetScript("OnClick", function() addonTable.SelectTab(1) end)
     tab3:SetScript("OnClick", function() addonTable.SelectTab(3) end)
-    helpBtn:SetScript("OnClick", function()
+    local function OpenHelpPanel()
+        if addonTable.SelectTab then
+            addonTable.SelectTab(2)
+        end
+    end
+    local function ToggleHelpPanel()
+        if panelHelp and panelHelp:IsShown() then
+            addonTable.SelectTab(1)
+        else
+            addonTable.SelectTab(2)
+        end
+    end
+    local function HandleHelpClick()
         if IsControlKeyDown() and IsShiftKeyDown() then
             if StaticPopup_Show then
                 if StaticPopupDialogs and StaticPopupDialogs["LOOTHUNTER_CONFIRM_RESET"] then
@@ -2079,12 +2148,15 @@ function LootHunter_CreateGUI()
             end
             return
         end
-        if panelHelp and panelHelp:IsShown() then
-            addonTable.SelectTab(1)
-        else
-            addonTable.SelectTab(2)
-        end
-    end)
+        ToggleHelpPanel()
+    end
+    helpBtn:SetScript("OnClick", HandleHelpClick)
+    if helpTopBtn then
+        helpTopBtn:SetScript("OnClick", HandleHelpClick)
+    end
+    if emptyHelpButton then
+        emptyHelpButton:SetScript("OnClick", OpenHelpPanel)
+    end
     if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.general and not LootHunterDB.settings.general.helpSeen then
         StartHelpPulse()
     else
@@ -2379,6 +2451,24 @@ function LootHunter_RefreshUI()
         local delBtn = CreateFrame("Button", nil, row, "UIPanelCloseButton")
         delBtn:SetSize(20, 20)
         delBtn:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+        delBtn:SetNormalTexture(DELETE_ICON_PATH)
+        delBtn:SetPushedTexture(DELETE_ICON_PATH)
+        delBtn:SetHighlightTexture(DELETE_ICON_PATH)
+        local delNormal = delBtn:GetNormalTexture()
+        if delNormal then delNormal:SetVertexColor(1, 1, 1, 0.9) end
+        local delPushed = delBtn:GetPushedTexture()
+        if delPushed then delPushed:SetVertexColor(0.85, 0.85, 0.85, 1) end
+        local delHighlight = delBtn:GetHighlightTexture()
+        if delHighlight then
+            delHighlight:SetVertexColor(1, 1, 1, 1)
+            delHighlight:SetBlendMode("ADD")
+        end
+        delBtn:SetScript("OnEnter", function()
+            if delNormal then delNormal:SetVertexColor(1, 1, 1, 1) end
+        end)
+        delBtn:SetScript("OnLeave", function()
+            if delNormal then delNormal:SetVertexColor(1, 1, 1, 0.9) end
+        end)
         delBtn:SetScript("OnClick", function() db[entry.id] = nil; LootHunter_RefreshUI() end)
 
         local function IsHeroicLocal(itemInfo)

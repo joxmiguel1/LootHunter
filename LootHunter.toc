@@ -1,9 +1,16 @@
-## Interface: 50400
-## Title: |cff00a86bLoot Hunter|r
-## Notes: Rastrea tu loot deseado y alerta cuando aparece en el botin.
+## Interface: 50503
+## Title: |cffaafdccLoot Hunter|r
+## Notes: Track your desired loot and get alerts when it drops.
+## Notes-esES: Rastrea tu botín deseado y recibe alertas cuando aparece.
+## Notes-esMX: Rastrea tu botín deseado y recibe alertas cuando aparece.
 ## Author: Xamael
-## Version: 1.0.3 
+## Version: 1.0.4 
 ## SavedVariables: LootHunterDB
+## IconTexture: Interface\AddOns\LootHunter\Textures\icon_help.tga
+## X-Curse-Project-ID: 1417341
+## X-Wago-ID: 56n9xDN9
+## X-Localizations: enUS, esES, esMX
+## X-CompatibleLocales: enUS, enGB, esES, esM
 
 
 ## Core libraries

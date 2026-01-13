@@ -1021,20 +1021,31 @@ local function ShowDropAlert(itemID, itemData)
         LogAlertDebug(string.format("Multiple drops detected (%d in batch); suppressing other-won for %.1fs", dropBatchCount, suppressOtherWonUntil - now))
     end
     local dropTitle = CreateGradient(L["DROP_ALERT_TITLE"], 1, 0.7, 0.2, 1, 0.45, 0)
-    local dropHeader = string.format("%s %s %s", ICON_DIAMOND, dropTitle, ICON_DIAMOND)
+    local isPriority = itemData and itemData.priority
+    local headerIcon = isPriority and ICON_STAR or ICON_DIAMOND
+    local dropHeader = string.format("%s %s %s", headerIcon, dropTitle, headerIcon)
     local dropItemLine = string.format("%s!", itemData.link or itemData.name or tostring(itemID))
     local _, instanceType = IsInInstance()
     -- Only show the roll reminder prompt in raids (no /roll flow in dungeons).
     local showPrompt = (instanceType == "raid")
     local dropPrompt = showPrompt and CreateGradient(L["DROP_ALERT_PROMPT"], 1, 0.85, 0.35, 1, 0.75, 0) or nil
-    local alertText = dropHeader .. "\n" .. dropItemLine .. (dropPrompt and ("\n" .. dropPrompt) or "")
+    local priorityLine = nil
+    if isPriority then
+        local label = L["PRIORITY_DROP_ALERT_LABEL"] or "PRIORITY LOOT"
+        priorityLine = CreateGradient(label, 1, 0.9, 0.2, 1, 0.75, 0)
+    end
+    local alertText = (priorityLine and (priorityLine .. "\n") or "") .. dropHeader .. "\n" .. dropItemLine .. (dropPrompt and ("\n" .. dropPrompt) or "")
     if not IsScopeAllowed(alertSettings.lostAlertScope) then
         return
     end
     EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_PRIMARY, function()
-        if addonTable.FlashScreen then addonTable.FlashScreen("ORANGE") end
+        if addonTable.FlashScreen then addonTable.FlashScreen(isPriority and "YELLOW" or "ORANGE") end
         if addonTable.ShowAlert then
-            addonTable.ShowAlert(alertText, 1, 0.55, 0.05)
+            if isPriority then
+                addonTable.ShowAlert(alertText, 1, 0.85, 0.2)
+            else
+                addonTable.ShowAlert(alertText, 1, 0.55, 0.05)
+            end
         end
         if not PlaySound(12867, "Master") then
             PlaySound(12867)

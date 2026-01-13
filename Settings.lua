@@ -146,7 +146,8 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
                         labelWidth = math.max(120, avail - entry.buttonWidth - 10)
                     end
                     if entry.previewInline then
-                        local previewSpace = 24
+                        local previewCount = type(entry.previewInline) == "number" and entry.previewInline or 1
+                        local previewSpace = 24 * previewCount
                         local textWidth = entry.label:GetStringWidth() or 0
                         if textWidth > 0 then
                             entry.label:SetWidth(math.min(labelWidth - previewSpace, textWidth))
@@ -452,7 +453,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
                 compact = panel._compactEntries,
             })
             ReflowPanel(panel)
-            return cb, desc, entryFrame
+            return cb, desc, entryFrame, previewBtn, label
         end
 
         table.insert(panel._layout, {
@@ -464,7 +465,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         })
         ReflowPanel(panel)
 
-        return cb, nil, entryFrame
+        return cb, nil, entryFrame, previewBtn, label
     end
 
     local function CreateDropdownRow(panel, labelText, options, getValue, setValue, description)
@@ -835,6 +836,27 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         PlaySound(12867, "Master")
     end
 
+    local function PreviewPriorityItemSeen()
+        if addonTable.ResetPreviewVisuals then addonTable.ResetPreviewVisuals() end
+        local itemName = "|cffa335ee[Preview Item]|r"
+        if L["DROP_CHAT_MSG"] then
+            print(string.format(L["DROP_CHAT_MSG"], itemName))
+        end
+        if addonTable.FlashScreen then addonTable.FlashScreen("YELLOW") end
+        local dropTitle = (addonTable.CreateGradient and addonTable.CreateGradient(L["DROP_ALERT_TITLE"], 1, 0.7, 0.2, 1, 0.45, 0)) or (L["DROP_ALERT_TITLE"] or "[DROP] ALERT")
+        local dropHeader = string.format("%s %s %s", ICON_STAR, dropTitle, ICON_STAR)
+        local dropItemLine = string.format("%s!", itemName)
+        local priorityLabel = (addonTable.CreateGradient and addonTable.CreateGradient(L["PRIORITY_DROP_ALERT_LABEL"] or "PRIORITY LOOT", 1, 0.9, 0.2, 1, 0.75, 0)) or (L["PRIORITY_DROP_ALERT_LABEL"] or "PRIORITY LOOT")
+        local dropPrompt = (addonTable.CreateGradient and addonTable.CreateGradient(L["DROP_ALERT_PROMPT"], 1, 0.85, 0.35, 1, 0.75, 0)) or (L["DROP_ALERT_PROMPT"] or "Don't forget to roll!")
+        local text = string.format("%s\n%s\n%s\n%s", priorityLabel, dropHeader, dropItemLine, dropPrompt)
+        if addonTable.ShowAlert then
+            addonTable.ShowAlert(text, 1, 0.85, 0.2)
+        else
+            print(text)
+        end
+        PlaySound(12867, "Master")
+    end
+
     local function PreviewLostAlert()
         if addonTable.ResetPreviewVisuals then addonTable.ResetPreviewVisuals() end
         local fakeItem = "|cffa335ee[Corrupted Ashbringer]|r"
@@ -880,7 +902,35 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
 
     local alertsPanel = Settings:CreateCategory("LootAlerts", L["LOOT_ALERTS_SETTINGS"])
     Settings:CreateCheckbox(alertsPanel, "lootAlerts.itemWon", L["SETTING_ALERTS_WON_LABEL"], L["SETTING_ALERTS_WON_DESC"], nil, PreviewItemWon)
-    Settings:CreateCheckbox(alertsPanel, "lootAlerts.itemSeen", L["SETTING_ALERTS_SEEN_LABEL"], L["SETTING_ALERTS_SEEN_DESC"], nil, PreviewItemSeen)
+    local _, _, itemSeenEntry, itemSeenPreview, itemSeenLabel = Settings:CreateCheckbox(alertsPanel, "lootAlerts.itemSeen", L["SETTING_ALERTS_SEEN_LABEL"], L["SETTING_ALERTS_SEEN_DESC"], nil, PreviewItemSeen)
+    if itemSeenEntry and itemSeenPreview then
+        local priorityPreview = CreateFrame("Button", nil, itemSeenEntry)
+        priorityPreview:SetSize(14, 14)
+        priorityPreview:SetPoint("LEFT", itemSeenPreview, "RIGHT", 4, 0)
+        priorityPreview:SetNormalTexture("Interface\\FriendsFrame\\InformationIcon")
+        priorityPreview:SetPushedTexture("Interface\\FriendsFrame\\InformationIcon")
+        priorityPreview:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
+        priorityPreview:SetAlpha(0.9)
+        priorityPreview:SetScript("OnClick", function()
+            PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+            PreviewPriorityItemSeen()
+        end)
+        priorityPreview:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(L["PRIORITY_ITEM_TOOLTIP"] or "Priority item", 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        priorityPreview:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        if alertsPanel and alertsPanel._layout and itemSeenLabel then
+            for _, entry in ipairs(alertsPanel._layout) do
+                if entry.label == itemSeenLabel then
+                    entry.previewInline = 2
+                    break
+                end
+            end
+            ReflowPanel(alertsPanel)
+        end
+    end
     CreateSectionHeader(alertsPanel, L["SETTING_ALERTS_LOST_SECTION"], -2)
     CreateDescription(alertsPanel, L["SETTING_ALERTS_LOST_DESC"])
     if alertsPanel._layout and alertsPanel._layout[#alertsPanel._layout] then

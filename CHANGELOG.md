@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.4
+- Added a top-left help icon next to settings with first-open pulse and a new empty-state help link.
+- Priority drops now show a yellow flash, star icons, and a "PRIORITY LOOT" header line.
+
 ## v1.0.3 HOTFIX
 - OTHER_WON no longer triggers when another player gets a tracked item via their own bonus roll; only shared /roll losses fire the red alert.
 
