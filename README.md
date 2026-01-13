@@ -1,8 +1,6 @@
 **![](https://media.forgecdn.net/attachments/description/1417341/description_c175ed07-d3d9-4a56-aa99-2c0450b75b6c.png)**
 
-### Never miss your BiS Again!
-
-*** 
+![](https://media.forgecdn.net/attachments/description/1417341/description_c5bda779-769b-4472-ba16-c5dfbe91f6d1.png)
 
  
 
@@ -12,34 +10,40 @@ Has this happened to you? The boss dies, and 5 minutes later you realize: **"Wai
 
 **Don't let it happen again.** Loot Hunter is your backup memory; you focus on your rotation, we make sure you never miss a single item.
 
+ 
+
 ## 🚀 Why this is a MUST-HAVE
 
 This addon eliminates human error from your raids:
 
 *   🔔 **Real-Time Loot Alerts:** If an item you need drops, the addon will scream (visually) so you don't miss it amidst the chat spam.
-*   🧠 **Smart Bonus Roll System:** The addon knows which bosses you care about. If you kill one and have a coin, it triggers a visual and audio alert **impossible to ignore**. Spend your rolls where they actually count!
+*   🧠 **Smart Bonus Roll System: (only in pandaria classic)** The addon knows which bosses you care about. If you kill one and have a coin, it triggers a visual and audio alert **impossible to ignore**. Spend your rolls where they actually count!
 *   ✨ **Independent Lists:** Manage separate lists per character and specialization without mixing anything up.
+
+ 
 
 ## ⚡ Key Features
 
 *   **🛍️ Smart Wishlist & Spec Detection:** Build your list by simply **Shift+Clicking** items in the Encounter Journal. The addon automatically tracks items by boss and specialization, with automatic spec detection and multi-language support.
 *   **📢 Unmissable Drop Alerts:** Get massive, screen-flashing visual alerts and clear chat notices the moment your tracked items appear in the loot window or are linked in raid chat, so you never miss a drop.
-*   **🏆 Complete Outcome Tracking:** Experience dedicated alerts for every outcome: a huge celebration when you **Win**, a lament when someone else gets your item, and a smart **Coin Reminder** with pre-warning logic so you never forget a bonus roll.
+*   **🏆 Complete Outcome Tracking:** Experience dedicated alerts for every outcome: a huge celebration when you **Win**, a lament when someone else gets your item, and a smart **Coin Reminder** (pandaria only) with pre-warning logic so you never forget a bonus roll.
 *   **⚙️ Deep Customization & Control:** Configure every alert to your liking, adjust the UI scale for your screen, and manage your per-character lists with quick tools to clear or reset your data.
 *   **🛡️ Set it and Forget it:** You don't need to keep the window open. Build your list, close the UI, and play in peace; the addon works in the background and only pops up when needed.
 *   **✨ Spec Flexibility:** Want the item for your off-spec? Simply **click on the spec name** in your list to manually toggle it instantly.
 *   **🎯 Priority Management:** Mark items as "High Priority" (double click) or "Obtained" (right click) to keep your list clean.
 *   **⚡ Quick Access:** Minimap button to check your list in seconds.
+*   🌐 **Multilanguage support!** (EN/ES)
 
-***
+ 
 
 ## 🎮 How to use it (It couldn't be easier)
 
-1.  Open the **Dungeon Journal** (`Shift+J`).
+1.  Open the **Dungeon Journal** (`Shift+J`) or a gear vendor.
 2.  Find the item you want.
 3.  **Shift+Click** the item.
 4.  **Done!** You can close everything now. Loot Hunter will watch that item for you forever.
 
+undefined
 
 ## 🗺️ Minimap Button
 
@@ -55,7 +59,7 @@ This addon eliminates human error from your raids:
 
 ## 📝 Notes
 
-*   Optimized for the **MoP Classic** API.
+*   Optimized for the **MoP Classic and Retail** API.
 
 ## 🤝 Support & Community
 
