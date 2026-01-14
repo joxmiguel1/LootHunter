@@ -1600,7 +1600,7 @@ function LootHunter_CreateGUI()
 
     -- 4. VISTA REPORTE DE BUGS
     local BUG_REPORT_URL = "https://github.com/joxmiguel1/LootHunter/issues/new"
-    local DISCORD_URL = "https://discord.gg/E3QMp6Eg"
+    local DISCORD_URL = "https://discord.gg/VSGkcb7H4V"
     local bugsTitle = CreateHelpText(viewBugs, L["HELP_BUGS_TITLE"], nil, -4, true)
     ApplySubtitleStyle(bugsTitle)
     local bugsDesc = CreateHelpText(viewBugs, L["HELP_BUGS_DESC"], bugsTitle, -8, false)

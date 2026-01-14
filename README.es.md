@@ -59,7 +59,7 @@ Este addon elimina el error humano de tus raids:
 
 ## 🤝 Soporte y Comunidad
 
-¿Tienes una idea para mejorar el addon o encontraste un error? [**[Únete a nuestro Discord]**](https://discord.gg/E3QMp6Eg) y ayúdanos a mejorarlo.
+¿Tienes una idea para mejorar el addon o encontraste un error? [**[Únete a nuestro Discord]**](https://discord.gg/VSGkcb7H4V) y ayúdanos a mejorarlo.
 
 ***
 
