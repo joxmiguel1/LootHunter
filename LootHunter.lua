@@ -1238,20 +1238,18 @@ local function StartTwoStageCoinReminder(key)
         end
     end)
 end
-local function ActivatePendingForBonusRoll(reason)
+local function CancelCoinRemindersForBonusRoll(reason)
+    if not PendingCoinReminders or not next(PendingCoinReminders) then return end
     for key, entry in pairs(PendingCoinReminders) do
-        if entry and not entry.timerStarted then
-            local waitWindow = GetCoinReminderWait()
-            if entry.blockCoin then
-                LogCoinDebug(string.format("Bonus roll activation ignored for %s because coin is blocked.", entry.boss or "Unknown"))
-            elseif entry.deathTime and (GetTime() - entry.deathTime) >= waitWindow then
-                LogCoinDebug(string.format("Bonus roll activation triggering reminder for %s.", entry.boss or "Unknown"))
-                StartCoinReminderTimer(key, "bonus_roll_activate", 0)
-            else
-                LogCoinDebug(string.format("Bonus roll activation deferred for %s (waiting %.0fs no-drop window).", entry.boss or "Unknown", waitWindow))
-            end
+        if entry then
+            entry.blockCoin = true
+            PendingCoinReminders[key] = nil
+            LogCoinDebug(string.format("Coin reminder canceled for %s due to bonus roll (%s).", entry.boss or "Unknown", reason or "bonus_roll"))
         end
     end
+end
+local function ActivatePendingForBonusRoll(reason)
+    CancelCoinRemindersForBonusRoll(reason or "bonus_roll_activate")
 end
 local function RemoveItemFromReminder(itemID)
     local key = FindReminderKeyForItem(itemID)

@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.5
+- Coin reminder no longer repeats during bonus roll; only WIN shows for tracked loot you win.
+
 ## v1.0.4
 - Added a top-left help icon next to settings with first-open pulse and a new empty-state help link.
 - Priority drops now show a yellow flash, star icons, and a "PRIORITY LOOT" header line.
