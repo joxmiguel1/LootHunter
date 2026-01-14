@@ -63,7 +63,7 @@ undefined
 
 ## 🤝 Support & Community
 
-Have an idea to improve the addon or found a bug? [**\[Join our Discord\]**](https://discord.gg/E3QMp6Eg) and help us make it better.
+Have an idea to improve the addon or found a bug? [**\[Join our Discord\]**](https://discord.gg/uGtR6xzHuB) and help us make it better.
 
 ***
 
