@@ -2,6 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
+<<<<<<< Updated upstream
 ## v1.0 
 - First stable release from the 1.5.x test branch.
 - Coin reminder flow finalized (post-drop timers stay pending; two-stage lost coin alerts intact).
@@ -96,3 +97,14 @@ All notable changes to this project will be documented in this file.
 ## 1.0-test
 - Initial release.
 - Coin system and List emerges from the void.
+=======
+- v1.0.5  
+    - Coin reminder no longer repeats during bonus roll; only WIN shows for tracked loot you win.  
+    - Fixed spec dropdown in item rows so it no longer shifts position after opening.  
+    - Spec dropdown now stays within the addon window when scrolling the list.  
+    - Added a new Stats tab placeholder to prepare upcoming statistics features.  
+- v1.0.4  
+    Link de discord erroneo, este es el bueno https://discord.gg/VSGkcb7H4V  
+- Update Discord link in README.md  
+- Update README.md  
+>>>>>>> Stashed changes

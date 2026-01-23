@@ -5,7 +5,7 @@ local CreateGradient = addonTable.CreateGradient or function(text) return text e
 -- Variables locales de UI -
 local mainFrame = nil
 local floatBtn = nil
-local panelList, panelHelp, panelConfig, panelLog = nil, nil, nil, nil
+local panelList, panelHelp, panelConfig, panelLog, panelStats = nil, nil, nil, nil, nil
 local scrollChild = nil
 local listScrollFrame = nil
 local emptyJournalButton, emptyInstruction, emptyHeader, emptyQuote, ghostIcon, logoIcon = nil, nil, nil, nil, nil, nil
@@ -69,6 +69,31 @@ local function RefreshRowTooltip(row, showCompare)
     GameTooltip:Show()
 end
 
+local function PositionRowSpecMenu(anchor)
+    if not specRowMenuFrame or not anchor then return end
+    local dropHeight = specRowMenuFrame:GetHeight() or 0
+    local frameTop = mainFrame and mainFrame:GetTop() or nil
+    local frameBottom = mainFrame and mainFrame:GetBottom() or nil
+    local anchorTop = anchor:GetTop() or nil
+    local anchorBottom = anchor:GetBottom() or nil
+    local openDown = true
+    if frameTop and frameBottom and anchorTop and anchorBottom and dropHeight > 0 then
+        local projectedBottom = anchorBottom - 2 - dropHeight
+        if projectedBottom < frameBottom then
+            local projectedTop = anchorTop + 2 + dropHeight
+            if projectedTop <= frameTop then
+                openDown = false
+            end
+        end
+    end
+    specRowMenuFrame:ClearAllPoints()
+    if openDown then
+        specRowMenuFrame:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
+    else
+        specRowMenuFrame:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 0, 2)
+    end
+end
+
 -- Fuerza nuestra fuente en todas las FontStrings de un frame (recursivo)
 local function ApplyAccentFontRecursive(frame)
     if not frame or type(frame) ~= "table" then return end
@@ -111,6 +136,7 @@ local function ShowRowSpecMenu(anchor, entry)
         specRowMenuFrame:SetBackdropColor(0.15, 0.15, 0.15, 0.95)
         specRowMenuFrame:SetBackdropBorderColor(0, 0, 0, 1)
         specRowMenuFrame:EnableMouse(true)
+        specRowMenuFrame:SetClampedToScreen(true)
         specRowMenuFrame:SetScript("OnHide", function(self)
             if self._ownerRow then
                 self._ownerRow._specMenuOpen = nil
@@ -166,8 +192,7 @@ local function ShowRowSpecMenu(anchor, entry)
     end
     specRowMenuFrame:SetHeight(math.abs(yPos) + 5)
     specRowMenuFrame:SetWidth(110)
-    specRowMenuFrame:ClearAllPoints()
-    specRowMenuFrame:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
+    PositionRowSpecMenu(anchor)
     ElevateDropdown(specRowMenuFrame, anchor)
     specRowMenuOverlay:Show()
     if entry.row then
@@ -1236,6 +1261,11 @@ function LootHunter_CreateGUI()
     listScrollFrame:SetScript("OnSizeChanged", function(self, w, h)
         scrollChild:SetWidth(w)
     end)
+    listScrollFrame:HookScript("OnVerticalScroll", function()
+        if specRowMenuFrame and specRowMenuFrame:IsShown() then
+            specRowMenuFrame:Hide()
+        end
+    end)
 
     -- PANEL DE AYUDA
     panelHelp = CreateFrame("Frame", nil, mainFrame)
@@ -1797,6 +1827,12 @@ function LootHunter_CreateGUI()
     panelLog:SetPoint("BOTTOMRIGHT", 0, 30)
     panelLog:Hide()
 
+    -- PANEL STATS (placeholder, se llena desde Stats.lua)
+    panelStats = CreateFrame("Frame", nil, mainFrame)
+    panelStats:SetPoint("TOPLEFT", 0, -25)
+    panelStats:SetPoint("BOTTOMRIGHT", 0, 30)
+    panelStats:Hide()
+
     local btnCopyLog = CreateFrame("Button", nil, panelLog, "BackdropTemplate")
     btnCopyLog:SetSize(70, 20)
     btnCopyLog:SetPoint("TOPRIGHT", panelLog, "TOPRIGHT", -5, -5)
@@ -1940,13 +1976,23 @@ function LootHunter_CreateGUI()
     tab1.bg:SetAllPoints()
     tab1.bg:SetTexture(ADDON_FOLDER .. "Textures\\backbutton.tga")
     tab1.bg:SetVertexColor(1, 1, 1, 1)
-    local tab3 = CreateFrame("Button", nil, mainFrame, "BackdropTemplate"); SetTabStyle(tab3); tab3:SetPoint("LEFT", tab1, "RIGHT", 5, 0); tab3:SetText(L["TAB_LOG"])
+
+    local tabStats = CreateFrame("Button", nil, mainFrame, "BackdropTemplate"); SetTabStyle(tabStats); tabStats:SetPoint("LEFT", tab1, "RIGHT", 5, 0); tabStats:SetText(L["TAB_STATS"] or "Stats")
+    tabStats._usePrimaryTextBlend = true
+    tabStats:SetBackdropColor(0, 0, 0, 0)
+    tabStats.bg = tabStats:CreateTexture(nil, "ARTWORK")
+    tabStats.bg:SetAllPoints()
+    tabStats.bg:SetTexture(ADDON_FOLDER .. "Textures\\backbutton.tga")
+    tabStats.bg:SetVertexColor(1, 1, 1, 1)
+
+    local tab3 = CreateFrame("Button", nil, mainFrame, "BackdropTemplate"); SetTabStyle(tab3); tab3:SetPoint("LEFT", tabStats, "RIGHT", 5, 0); tab3:SetText(L["TAB_LOG"])
     tab3:SetBackdropColor(0, 0, 0, 0)
     tab3.bg = tab3:CreateTexture(nil, "ARTWORK")
     tab3.bg:SetAllPoints()
     tab3.bg:SetTexture(ADDON_FOLDER .. "Textures\\backbutton.tga")
     tab3.bg:SetVertexColor(1, 1, 1, 1)
     tab1:SetFrameLevel(mainFrame:GetFrameLevel() + 6)
+    tabStats:SetFrameLevel(mainFrame:GetFrameLevel() + 6)
     tab3:SetFrameLevel(mainFrame:GetFrameLevel() + 6)
     tab3:SetShown(debugMode)
     tab3:SetEnabled(debugMode)
@@ -2035,12 +2081,13 @@ function LootHunter_CreateGUI()
 
     addonTable.SelectTab = function(id)
         CloseAllDropdowns()
-        panelList:Hide(); panelHelp:Hide(); panelConfig:Hide(); panelLog:Hide()
-        tab1:Enable(); tab3:Enable()
+        panelList:Hide(); panelHelp:Hide(); panelConfig:Hide(); panelLog:Hide(); panelStats:Hide()
+        tab1:Enable(); tab3:Enable(); tabStats:Enable()
         helpBtn:SetButtonState("NORMAL")
         helpBtn.active:Hide()
         SetTabState(tab1, false)
         SetTabState(tab3, false)
+        SetTabState(tabStats, false)
         if id == 1 then
             panelList:Show(); tab1:Disable()
             ApplyAccentFontRecursive(panelList)
@@ -2060,14 +2107,22 @@ function LootHunter_CreateGUI()
             end
             panelConfig:Show()
             ApplyAccentFontRecursive(panelConfig)
+        elseif id == 5 then
+            panelStats:Show(); tabStats:Disable()
+            if addonTable.BuildStatsPanelInto then
+                addonTable.BuildStatsPanelInto(panelStats)
+            end
         end
         if id == 1 then
             SetTabState(tab1, true)
         elseif id == 3 then
             SetTabState(tab3, true)
+        elseif id == 5 then
+            SetTabState(tabStats, true)
         end
     end
     tab1:SetScript("OnClick", function() addonTable.SelectTab(1) end)
+    tabStats:SetScript("OnClick", function() addonTable.SelectTab(5) end)
     tab3:SetScript("OnClick", function() addonTable.SelectTab(3) end)
     helpBtn:SetScript("OnClick", function()
         if IsControlKeyDown() and IsShiftKeyDown() then
