@@ -2,7 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-<<<<<<< Updated upstream
+======
+## v1.0.5  
+    - Coin reminder no longer repeats during bonus roll; only WIN shows for tracked loot you win.  
+    - Fixed spec dropdown in item rows so it no longer shifts position after opening.  
+    - Spec dropdown now stays within the addon window when scrolling the list.  
+    - Added a new Stats tab placeholder to prepare upcoming statistics features.  
+
+## v1.0.4  
+- Update Discord link in README.md  
+- Update README.md
+
+## v1.0.5
+- Coin reminder no longer repeats during bonus roll; only WIN shows for tracked loot you win.
+
+## v1.0.4
+- Added a top-left help icon next to settings with first-open pulse and a new empty-state help link.
+- Priority drops now show a yellow flash, star icons, and a "PRIORITY LOOT" header line.
+
+## v1.0.3 HOTFIX
+- OTHER_WON no longer triggers when another player gets a tracked item via their own bonus roll; only shared /roll losses fire the red alert.
+
+## v1.0.2
+- Fixed bonus roll loot messages (self/other) so tracked items won via bonus rolls now trigger the WIN alert and status update.
+- Suppressed OTHER_WON alerts when another player receives an item from their own bonus roll (only fires when a shared /roll is lost).
+
 ## v1.0 
 - First stable release from the 1.5.x test branch.
 - Coin reminder flow finalized (post-drop timers stay pending; two-stage lost coin alerts intact).
@@ -97,14 +121,4 @@ All notable changes to this project will be documented in this file.
 ## 1.0-test
 - Initial release.
 - Coin system and List emerges from the void.
-=======
-- v1.0.5  
-    - Coin reminder no longer repeats during bonus roll; only WIN shows for tracked loot you win.  
-    - Fixed spec dropdown in item rows so it no longer shifts position after opening.  
-    - Spec dropdown now stays within the addon window when scrolling the list.  
-    - Added a new Stats tab placeholder to prepare upcoming statistics features.  
-- v1.0.4  
-    Link de discord erroneo, este es el bueno https://discord.gg/VSGkcb7H4V  
-- Update Discord link in README.md  
-- Update README.md  
->>>>>>> Stashed changes
+
