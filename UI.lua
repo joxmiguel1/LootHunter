@@ -17,6 +17,7 @@ local currentSourceFilter = "ALL"
 local currentTypeFilter = "ALL"
 local topPanel = nil
 local pendingRefresh = false
+local refreshAfterRowDropdown = false
 local specRowMenuFrame = nil
 local specRowMenuOverlay = nil
 local typeMenuFrame, sourceMenuFrame, specMenuFrame = nil, nil, nil
@@ -117,6 +118,10 @@ local function ShowRowSpecMenu(anchor, entry)
                 self._ownerRow = nil
             end
             if specRowMenuOverlay then specRowMenuOverlay:Hide() end
+            if refreshAfterRowDropdown then
+                refreshAfterRowDropdown = false
+                LootHunter_RefreshUI()
+            end
         end)
     end
     if not specRowMenuOverlay then
@@ -1171,7 +1176,7 @@ function LootHunter_CreateGUI()
         if ghostAnim:IsPlaying() then
             ghostAnim:Stop()
         end
-        logoAnim:Play()
+        -- logoAnim:Play()
     end)
     emptyContainer:HookScript("OnHide", function()
         if logoAnim:IsPlaying() then
@@ -2183,6 +2188,10 @@ function LootHunter_CreateGUI()
 end
 
 function LootHunter_RefreshUI()
+    if specRowMenuFrame and specRowMenuFrame:IsShown() then
+        refreshAfterRowDropdown = true
+        return
+    end
     if addonTable.isRefreshing then
         pendingRefresh = true
         return
