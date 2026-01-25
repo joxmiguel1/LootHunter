@@ -22,6 +22,13 @@ local EnsureHeroicQueuePopup
 local ScheduleHeroicQueueCheck
 local lastHeroicPrompt = 0
 local heroPopupShown = false
+local charKey = nil
+local StatsStore = {
+    MAX_HISTORY_EVENTS = 200,
+    MAX_SESSION_LOGS = 20,
+    currentHistory = nil,
+    currentSessionKey = nil,
+}
 local function SafeLeaveLFG()
     if LeaveLFG then
         local ok = pcall(LeaveLFG, _G.LE_LFG_CATEGORY_LFD or 1)
@@ -136,6 +143,355 @@ local SPEC_ID_BY_CLASS = {
 local SPEC_ID_BY_CLASS_NAME = {}
 local SPEC_NAME_BY_CLASS_ID = {}
 local specMapsBuilt = false
+
+-- =============================================================
+-- History and Session helpers (packed to reduce locals)
+-- =============================================================
+function StatsStore:EnsureHistoryDB()
+    if not LootHunterDB or not charKey then return nil end
+    if not LootHunterDB.History then LootHunterDB.History = {} end
+    if not LootHunterDB.History[charKey] then
+        LootHunterDB.History[charKey] = {
+            events = {},
+            counters = {},
+            lastWinAt = nil,
+        }
+    end
+    local hist = LootHunterDB.History[charKey]
+    hist.events = hist.events or {}
+    hist.counters = hist.counters or {}
+    hist.counters.drops = hist.counters.drops or 0
+    hist.counters.wins = hist.counters.wins or 0
+    hist.counters.losses = hist.counters.losses or 0
+    hist.counters.coinReminders = hist.counters.coinReminders or 0
+    hist.counters.coinsUsed = hist.counters.coinsUsed or 0
+    hist.counters.bossNoLoot = hist.counters.bossNoLoot or 0
+    self.currentHistory = hist
+    return hist
+end
+
+function StatsStore:TrimHistory(hist)
+    if not hist or not hist.events then return end
+    while #hist.events > self.MAX_HISTORY_EVENTS do
+        table.remove(hist.events, 1)
+    end
+end
+
+function StatsStore:RecordHistoryEvent(kind, payload)
+    local hist = self:EnsureHistoryDB()
+    if not hist then return end
+    local now = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
+    local event = {
+        kind = kind,
+        time = now,
+        itemID = payload and payload.itemID or nil,
+        link = payload and payload.link or nil,
+        player = payload and payload.player or nil,
+        roll = payload and payload.roll or nil,
+        boss = payload and payload.boss or payload and payload.source or nil,
+    }
+    hist.events[#hist.events + 1] = event
+    local counters = hist.counters
+    if kind == "drop" then
+        counters.drops = counters.drops + 1
+    elseif kind == "won" then
+        counters.wins = counters.wins + 1
+        hist.lastWinAt = now
+    elseif kind == "lost" then
+        counters.losses = counters.losses + 1
+    elseif kind == "coin_reminder" then
+        counters.coinReminders = counters.coinReminders + 1
+    elseif kind == "coin_used" then
+        counters.coinsUsed = counters.coinsUsed + 1
+    elseif kind == "boss_no_loot" then
+        counters.bossNoLoot = counters.bossNoLoot + 1
+    end
+    self:TrimHistory(hist)
+end
+
+function StatsStore:GetHistoryStats()
+    local hist = self.currentHistory or self:EnsureHistoryDB()
+    local counters = hist and hist.counters or {}
+    return {
+        drops = counters.drops or 0,
+        wins = counters.wins or 0,
+        losses = counters.losses or 0,
+        coinReminders = counters.coinReminders or 0,
+        coinsUsed = counters.coinsUsed or 0,
+        bossNoLoot = counters.bossNoLoot or 0,
+        lastWinAt = hist and hist.lastWinAt or nil,
+    }
+end
+addonTable.GetHistoryStats = function() return StatsStore:GetHistoryStats() end
+
+function StatsStore:ResetAllStats()
+    if not LootHunterDB or not charKey then return false end
+    if LootHunterDB.Sessions then
+        LootHunterDB.Sessions[charKey] = { sessions = {}, counters = {} }
+    end
+    self.currentSessionKey = nil
+    self:EnsureSessionDB()
+    return true
+end
+addonTable.ResetAllStats = function() return StatsStore:ResetAllStats() end
+
+function StatsStore:EnsureSessionDB()
+    if not LootHunterDB or not charKey then return nil end
+    if not LootHunterDB.Sessions then LootHunterDB.Sessions = {} end
+    if not LootHunterDB.Sessions[charKey] then
+        LootHunterDB.Sessions[charKey] = { sessions = {}, counters = {} }
+    end
+    local db = LootHunterDB.Sessions[charKey]
+    db.sessions = db.sessions or {}
+    db.counters = db.counters or {}
+    return db
+end
+
+function StatsStore:BuildSessionLabel(raidName, sessionIndex, startedAt)
+    local dateStr = (type(date) == "function" and date("%m/%d/%Y", startedAt or time())) or tostring(startedAt or "")
+    return string.format("%s #%d - %s", raidName or "Raid", sessionIndex or 1, dateStr)
+end
+
+function StatsStore:GetMostRecentSession(raidName, instanceID)
+    local db = self:EnsureSessionDB()
+    if not db then return nil end
+    local best = nil
+    for _, session in pairs(db.sessions) do
+        if session.raidName == raidName then
+            if not instanceID or not session.instanceID or session.instanceID == instanceID then
+                if not best or (session.startedAt or 0) > (best.startedAt or 0) then
+                    best = session
+                end
+            end
+        end
+    end
+    return best
+end
+
+function StatsStore:StartSession(raidName, difficultyName, instanceID)
+    local db = self:EnsureSessionDB()
+    if not db then return nil end
+    raidName = raidName or "Raid"
+    db.counters[raidName] = (db.counters[raidName] or 0) + 1
+    local idx = db.counters[raidName]
+    local startedAt = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
+    local key = string.format("%s|%d|%s", raidName, idx, tostring(startedAt))
+    db.sessions[key] = {
+        key = key,
+        raidName = raidName,
+        difficulty = difficultyName,
+        instanceID = instanceID,
+        sessionIndex = idx,
+        startedAt = startedAt,
+        lastEventAt = startedAt,
+        items = {},
+        perPlayer = {},
+        deaths = {},
+        revives = {},
+        label = self:BuildSessionLabel(raidName, idx, startedAt),
+    }
+    self.currentSessionKey = key
+    return key, db.sessions[key]
+end
+
+function StatsStore:EnsureCurrentSession()
+    local inInstance, instanceType = IsInInstance()
+    if not inInstance or instanceType ~= "raid" then
+        self.currentSessionKey = nil
+        return nil
+    end
+    local raidName, _, _, difficultyName, _, _, _, instanceID = GetInstanceInfo()
+    if not raidName then return nil end
+    local db = self:EnsureSessionDB()
+    if not db then return nil end
+    if self.currentSessionKey and db.sessions[self.currentSessionKey] then
+        local sess = db.sessions[self.currentSessionKey]
+        if sess.raidName == raidName and (not sess.instanceID or not instanceID or sess.instanceID == instanceID) then
+            sess.deaths = sess.deaths or {}
+            sess.revives = sess.revives or {}
+            return self.currentSessionKey, sess
+        end
+    end
+    local recent = self:GetMostRecentSession(raidName, instanceID)
+    if recent then
+        self.currentSessionKey = recent.key
+        recent.deaths = recent.deaths or {}
+        recent.revives = recent.revives or {}
+        return recent.key, recent
+    end
+    return self:StartSession(raidName, difficultyName, instanceID)
+end
+
+function StatsStore:ResolveClassToken(name)
+    if not name or name == "" then return nil end
+    local base = name:match("^[^-]+") or name
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do
+            local unit = "raid" .. i
+            local unitName = UnitName(unit)
+            if unitName == base then
+                local _, classToken = UnitClass(unit)
+                return classToken
+            end
+        end
+    elseif IsInGroup() then
+        for i = 1, GetNumSubgroupMembers() do
+            local unit = "party" .. i
+            local unitName = UnitName(unit)
+            if unitName == base then
+                local _, classToken = UnitClass(unit)
+                return classToken
+            end
+        end
+    end
+    if base == UnitName("player") then
+        local _, classToken = UnitClass("player")
+        return classToken
+    end
+    return nil
+end
+
+function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, rollValue, wonViaRoll, boss, isBonusLoot)
+    local key, session = self:EnsureCurrentSession()
+    if not key or not session then return end
+    local icon = nil
+    if itemID then
+        icon = select(10, GetItemInfo(itemID))
+    end
+    local now = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
+    local entry = {
+        itemID = itemID,
+        link = link,
+        icon = icon,
+        player = playerName or UnitName("player"),
+        class = classToken or self:ResolveClassToken(playerName),
+        roll = rollValue,
+        wonViaRoll = wonViaRoll,
+        time = now,
+        boss = boss,
+        bonus = isBonusLoot or false,
+        destroyed = false,
+    }
+    session.items[#session.items + 1] = entry
+    session.lastEventAt = now
+    local perPlayer = session.perPlayer
+    local playerKey = entry.player or "Unknown"
+    if not perPlayer[playerKey] then
+        perPlayer[playerKey] = { count = 0, class = entry.class }
+    end
+    perPlayer[playerKey].count = perPlayer[playerKey].count + 1
+    if entry.class and not perPlayer[playerKey].class then
+        perPlayer[playerKey].class = entry.class
+    end
+    local db = self:EnsureSessionDB()
+    if db then
+        local keys = {}
+        for k in pairs(db.sessions) do keys[#keys + 1] = k end
+        table.sort(keys, function(a, b)
+            local sa = db.sessions[a] and db.sessions[a].startedAt or 0
+            local sb = db.sessions[b] and db.sessions[b].startedAt or 0
+            return sa > sb
+        end)
+        if #keys > self.MAX_SESSION_LOGS then
+            for i = self.MAX_SESSION_LOGS + 1, #keys do
+                db.sessions[keys[i]] = nil
+            end
+        end
+    end
+end
+
+function StatsStore:GetSessionList()
+    local db = self:EnsureSessionDB()
+    if not db then return {} end
+    local items = {}
+    for key, session in pairs(db.sessions) do
+        items[#items + 1] = {
+            key = key,
+            label = session.label or self:BuildSessionLabel(session.raidName, session.sessionIndex, session.startedAt),
+            raidName = session.raidName,
+            startedAt = session.startedAt or 0,
+            difficulty = session.difficulty,
+            sessionIndex = session.sessionIndex or 1,
+        }
+    end
+    table.sort(items, function(a, b) return (a.startedAt or 0) > (b.startedAt or 0) end)
+    return items
+end
+
+function StatsStore:GetSessionByKey(key)
+    local db = self:EnsureSessionDB()
+    if not db then return nil end
+    return db.sessions[key]
+end
+
+function StatsStore:AddDeath(name)
+    local _, session = self:EnsureCurrentSession()
+    if not session and self.currentSessionKey then
+        local db = self:EnsureSessionDB()
+        if db and db.sessions then
+            session = db.sessions[self.currentSessionKey]
+        end
+    end
+    if not session then return end
+    name = name or "Unknown"
+    session.deaths = session.deaths or {}
+    session.deaths[name] = (session.deaths[name] or 0) + 1
+end
+
+function StatsStore:AddRevive(name)
+    local _, session = self:EnsureCurrentSession()
+    if not session and self.currentSessionKey then
+        local db = self:EnsureSessionDB()
+        if db and db.sessions then
+            session = db.sessions[self.currentSessionKey]
+        end
+    end
+    if not session then return end
+    name = name or "Unknown"
+    session.revives = session.revives or {}
+    session.revives[name] = (session.revives[name] or 0) + 1
+end
+
+function StatsStore:GetLatestSessionKey()
+    local list = self:GetSessionList()
+    return list[1] and list[1].key or nil
+end
+
+function StatsStore:GetSessionLeaderboard(key)
+    local session = self:GetSessionByKey(key or self.currentSessionKey)
+    if not session then return {} end
+    local counts = {}
+    for _, entry in ipairs(session.items or {}) do
+        local p = entry.player or "Unknown"
+        if not counts[p] then counts[p] = { count = 0, class = entry.class } end
+        counts[p].count = counts[p].count + 1
+        if entry.class and not counts[p].class then counts[p].class = entry.class end
+    end
+    local out = {}
+    for name, data in pairs(counts) do
+        out[#out + 1] = { name = name, count = data.count or 0, class = data.class }
+    end
+    table.sort(out, function(a, b)
+        if (a.count or 0) == (b.count or 0) then
+            return (a.name or "") < (b.name or "")
+        end
+        return (a.count or 0) > (b.count or 0)
+    end)
+    return out
+end
+
+function StatsStore:GetSessionItems(key)
+    local session = self:GetSessionByKey(key or self.currentSessionKey)
+    if not session then return {} end
+    return session.items or {}
+end
+
+addonTable.GetSessionList = function() return StatsStore:GetSessionList() end
+addonTable.GetSessionItems = function(key) return StatsStore:GetSessionItems(key) end
+addonTable.GetSessionLeaderboard = function(key) return StatsStore:GetSessionLeaderboard(key) end
+addonTable.GetLatestSessionKey = function() return StatsStore:GetLatestSessionKey() end
+addonTable.GetSessionByKey = function(key) return StatsStore:GetSessionByKey(key) end
+addonTable.GetCurrentSessionKey = function() return StatsStore.currentSessionKey end
 
 local function GetAddonLanguage()
     local db = LootHunterDB or addonTable.db
@@ -296,12 +652,13 @@ local COIN_REMINDER_FALLBACK = 40
 local PREWARN_SOUND_ID = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081
 local COIN_LOST_SOUND_ID = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081
 local OTHER_WON_SOUND = "Sound\\Creature\\ArthasPrisoner\\UR_ArthasPrisoner_YSVisThree01.ogg"
-local ROLL_TRACK_WINDOW = 35
+local ROLL_TRACK_WINDOW = 50
 local MULTI_DROP_SUPPRESS_WINDOW = 60
 local lastAnnouncedRollItemID = nil
 local lastAnnouncedRollTime = nil
 local lastPlayerRollItemID = nil
 local lastPlayerRollTime = nil
+local lastPlayerRollValue = nil
 local ALERT_DEFAULT_DURATION = 6.8
 local ALERT_PRIORITY_PRIMARY = 1
 local ALERT_PRIORITY_SECONDARY = 2
@@ -532,10 +889,12 @@ local function HandleAddonLoaded(event, arg1)
     end
 
     if not LootHunterDB.Characters then LootHunterDB.Characters = {} end
-    local charKey = UnitName("player") .. " - " .. GetRealmName()
+    charKey = UnitName("player") .. " - " .. GetRealmName()
     if not LootHunterDB.Characters[charKey] then LootHunterDB.Characters[charKey] = {} end
     CurrentCharDB = LootHunterDB.Characters[charKey]
     addonTable.CurrentCharDB = CurrentCharDB -- Compartir con UI.lua
+    StatsStore:EnsureHistoryDB()
+    StatsStore:EnsureSessionDB()
     MigrateSpecIDs()
 
     local count = 0
@@ -994,6 +1353,7 @@ local function ShowDropAlert(itemID, itemData)
     if CurrentCharDB and CurrentCharDB[itemID] then
         CurrentCharDB[itemID].status = 1
         CurrentCharDB[itemID].lastState = "drop"
+        StatsStore:RecordHistoryEvent("drop", { itemID = itemID, link = itemData.link or itemData.name, boss = itemData.boss, player = UnitName("player") })
     end
     lastAnnouncedRollItemID = itemID
     lastAnnouncedRollTime = GetTime()
@@ -1475,16 +1835,17 @@ end
 local function BuildSelfLootPatterns()
     local patterns = {}
     local formats = {
-        LOOT_ITEM_PUSHED_SELF,
-        LOOT_ITEM_SELF,
-        LOOT_ITEM_SELF_MULTIPLE,
-        LOOT_ITEM_BONUS_ROLL_SELF,
-        LOOT_ITEM_BONUS_ROLL_SELF_MULTIPLE,
+        { fmt = LOOT_ITEM_PUSHED_SELF, bonus = false },
+        { fmt = LOOT_ITEM_SELF, bonus = false },
+        { fmt = LOOT_ITEM_SELF_MULTIPLE, bonus = false },
+        { fmt = LOOT_ITEM_BONUS_ROLL_SELF, bonus = true },
+        { fmt = LOOT_ITEM_BONUS_ROLL_SELF_MULTIPLE, bonus = true },
     }
-    for _, fmt in ipairs(formats) do
+    for _, entry in ipairs(formats) do
+        local fmt = entry.fmt
         if type(fmt) == "string" and fmt ~= "" then
             local pattern = "^" .. fmt:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
-            table.insert(patterns, pattern)
+            table.insert(patterns, { pattern = pattern, isBonusRoll = entry.bonus })
         end
     end
     return patterns
@@ -1512,6 +1873,7 @@ end
 local selfLootPatterns = BuildSelfLootPatterns()
 local otherLootPatterns = BuildOtherLootPatterns()
 local rollResultPattern = "^" .. (RANDOM_ROLL_RESULT or "%s rolls %d (%d-%d)"):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
+local rollFallbackPattern = "^(.-)%s+[Rr][Oo][Ll][Ll][Ss]%s+(%d+)%s+%((%d+)%-(%d+)%)"
 local function IsPlayerRollMessage(msg)
     if type(msg) ~= "string" then return false end
     local name = msg:match(rollResultPattern)
@@ -1561,6 +1923,7 @@ local function HandleInstanceChange(event)
     if UpdateRaidChatFilter then
         UpdateRaidChatFilter()
     end
+    StatsStore:EnsureCurrentSession()
 end
 
 IsScopeAllowed = function(scope)
@@ -1582,6 +1945,16 @@ local function ShouldShowLostAlert()
     return IsScopeAllowed(settings.lostAlertScope)
 end
 
+local function GetRecentPlayerRollForItem(itemID)
+    if not lastPlayerRollTime then return nil end
+    local now = GetTime and GetTime() or 0
+    if (now - lastPlayerRollTime) > ROLL_TRACK_WINDOW then return nil end
+    if lastPlayerRollItemID and itemID and lastPlayerRollItemID ~= itemID then
+        return nil
+    end
+    return lastPlayerRollValue
+end
+
 local function RecentlyDropped(itemID)
     if not itemID or not LastDropAlert[itemID] then return false end
     local now = GetTime and GetTime() or 0
@@ -1589,7 +1962,19 @@ local function RecentlyDropped(itemID)
 end
 
 local function HandleChatSystem(event, msg, ...)
-    if not IsPlayerRollMessage(msg) then return end
+    if type(msg) ~= "string" then return end
+    local name, rollVal = msg:match(rollResultPattern)
+    if not name then
+        name, rollVal = msg:match(rollFallbackPattern)
+    end
+    if not name or not rollVal then return end
+    local playerName = UnitName("player")
+    local you = _G.YOU or "You"
+    local youCaps = _G.YOU_CAPS
+    if not (name == playerName or name == you or (youCaps and name == youCaps)) then
+        return
+    end
+    lastPlayerRollValue = tonumber(rollVal)
     lastPlayerRollTime = GetTime()
     if lastAnnouncedRollItemID and lastAnnouncedRollTime
         and (lastPlayerRollTime - lastAnnouncedRollTime) <= ROLL_TRACK_WINDOW then
@@ -1605,10 +1990,11 @@ local function HandleChatLoot(event, msg, ...)
     local lootViaBonusRoll = false
     -- Comprueba si el jugador mismo despojó el objeto
     for _, pattern in ipairs(selfLootPatterns) do
-        local capturedItemLink = msg:match(pattern)
+        local capturedItemLink = pattern.pattern and msg:match(pattern.pattern) or nil
         if capturedItemLink then
-            itemLink = capturedItemLink
             isMine = true
+            lootViaBonusRoll = pattern.isBonusRoll or false
+            itemLink = capturedItemLink
             break
         end
     end
@@ -1625,13 +2011,6 @@ local function HandleChatLoot(event, msg, ...)
             end
         end
     end
-    if lootViaBonusRoll then
-        -- Si otro obtiene el item por bonus roll, no mostramos OTHER_WON (no hay /roll compartido).
-        if LogAlertDebug then
-            LogAlertDebug(string.format("Skipping OTHER_WON for bonus roll loot from %s: %s", tostring(playerName or "?"), tostring(itemLink or "?")))
-        end
-        return
-    end
     if not itemLink then return end
     local id = tonumber(string.match(itemLink, "item:(%d+):"))
     if not id then return end
@@ -1644,12 +2023,21 @@ local function HandleChatLoot(event, msg, ...)
             tostring(CurrentCharDB and CurrentCharDB[id] and true or false)))
     end
     TriggerLootActivityTimerForItemID(id)
+    -- Log de sesión para cualquier loot (tracked o no)
+    local playerRollValue = isMine and GetRecentPlayerRollForItem(id) or nil
+    StatsStore:AddSessionLootEntry(id, itemLink, playerName or (isMine and UnitName("player")) or playerName, nil, playerRollValue, playerRollValue ~= nil, nil, lootViaBonusRoll)
     if CurrentCharDB[id] then
         local itemData = CurrentCharDB[id]
         if isMine then
+            if playerRollValue then
+                lastPlayerRollItemID = nil
+                lastPlayerRollValue = nil
+                lastPlayerRollTime = nil
+            end
             if itemData.status ~= 2 then
                 itemData.status = 2
                 itemData.lastState = "won"
+                StatsStore:RecordHistoryEvent("won", { itemID = id, link = itemData.link or itemData.name, boss = itemData.boss, player = UnitName("player") })
                 LootHunter_RefreshUI()
                 RemoveItemFromReminder(id)
                 local allowScope = IsScopeAllowed(LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts and LootHunterDB.settings.lootAlerts.lostAlertScope)
@@ -1675,6 +2063,7 @@ local function HandleChatLoot(event, msg, ...)
                 local viaRecentDrop = not viaRoll and RecentlyDropped(id)
                 if viaRoll or viaRecentDrop then
                 itemData.status = 1
+                StatsStore:RecordHistoryEvent("lost", { itemID = id, link = itemData.link or itemData.name, boss = itemData.boss, player = playerName or L["UNKNOWN_SOURCE"] })
                 LootHunter_RefreshUI()
                 local allowLostAlert = ShouldShowLostAlert()
                 if allowLostAlert and LootHunterDB.settings.lootAlerts.itemSeen then
@@ -1754,6 +2143,29 @@ local function HandleChatLoot(event, msg, ...)
                 end
             end
         end
+    end
+end
+
+local function HandleCombatLogEvent()
+    if not CombatLogGetCurrentEventInfo then return end
+    local _, subEvent, _, _, sourceName, _, _, _, destName, destFlags = CombatLogGetCurrentEventInfo()
+    if not subEvent then return end
+    local function NormalizeSimple(name)
+        if not name or name == "" then return nil end
+        if Ambiguate then return Ambiguate(name, "short") end
+        return name:match("^[^-]+") or name
+    end
+    local function IsPlayerFlag(flags)
+        if not flags then return false end
+        local band = bit and bit.band
+        local COMBATLOG_OBJECT_TYPE_PLAYER = _G.COMBATLOG_OBJECT_TYPE_PLAYER or 0x00000400
+        return band and band(flags, COMBATLOG_OBJECT_TYPE_PLAYER) > 0
+    end
+    local normDest = NormalizeSimple(destName)
+    if subEvent == "UNIT_DIED" and normDest and IsPlayerFlag(destFlags) then
+        StatsStore:AddDeath(normDest)
+    elseif subEvent == "SPELL_RESURRECT" and normDest and IsPlayerFlag(destFlags) then
+        StatsStore:AddRevive(normDest)
     end
 end
 local function PlayOtherWonSound(force)
@@ -1848,6 +2260,7 @@ end
 -- Detecta cuando alguien linkea items en chat (raid/party) para disparar alerta DROP y recordatorio
 local function HandleChatLinkAnnounce(event, msg, sender, ...)
     if not CurrentCharDB or type(msg) ~= "string" then return end
+    -- Detect disenchant announce
     if not IsAuthorizedAnnounce(sender) then return end
     for link in msg:gmatch("|Hitem:[-%d:]+|h.-|h") do
         local itemID = tonumber(link:match("item:(%d+):"))
@@ -2213,6 +2626,7 @@ local eventHandlers = {
     CHAT_MSG_PARTY = HandleChatLinkAnnounce,
     CHAT_MSG_PARTY_LEADER = HandleChatLinkAnnounce,
     START_LOOT_ROLL = HandleStartLootRoll,
+    COMBAT_LOG_EVENT_UNFILTERED = HandleCombatLogEvent,
     PLAYER_SPECIALIZATION_CHANGED = HandleSpecChange,
     ACTIVE_TALENT_GROUP_CHANGED = HandleSpecChange,
     PLAYER_TALENT_UPDATE = HandleSpecChange,
@@ -2705,6 +3119,7 @@ SlashCmdList["LOOTHUNTER_DROP"] = function(msg)
     LootHunter_RefreshUI()
 end
 
+
 SLASH_LOOTHUNTER_WON1 = "/lh_won"
 SlashCmdList["LOOTHUNTER_WON"] = function(msg)
     if not CurrentCharDB then return end
@@ -2717,6 +3132,8 @@ SlashCmdList["LOOTHUNTER_WON"] = function(msg)
     if entry and entry.status ~= 2 then
         entry.status = 2
         entry.lastState = "won"
+        StatsStore:RecordHistoryEvent("won", { itemID = itemID, link = entry.link or entry.name, boss = entry.boss, player = UnitName("player") })
+        StatsStore:AddSessionLootEntry(itemID, entry.link or entry.name, UnitName("player"), select(2, UnitClass("player")), nil, false, entry.boss, entry.bonus)
         LootHunter_RefreshUI()
         if LootHunterDB.settings.lootAlerts.itemWon then
             local winTitle = CreateGradient(L["WIN_ALERT_TITLE"], 0.35, 1, 0.35, 0.65, 1, 0.65)

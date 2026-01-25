@@ -204,6 +204,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         fs:SetWordWrap(true)
         if fs.SetNonSpaceWrap then pcall(fs.SetNonSpaceWrap, fs, true) end
         if fs.SetMaxLines then pcall(fs.SetMaxLines, fs, 0) end
+        if fs.SetSpacing then pcall(fs.SetSpacing, fs, 2) end
         fs:SetText(text or "")
         table.insert(panel._layout, {
             frame = entryFrame,
@@ -638,7 +639,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         return string.format("%ds", s)
     end
 
-    function Settings:CreateSlider(panel, key, labelText, minValue, maxValue, step, description)
+    function Settings:CreateSlider(panel, key, labelText, minValue, maxValue, step, description, formatFn)
         local entryFrame = CreateFrame("Frame", nil, panel)
         entryFrame:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
         entryFrame:SetPoint("RIGHT", panel, "RIGHT", 0, 0)
@@ -675,12 +676,13 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
 
         local low = slider.Low or _G[slider:GetName() .. "Low"]
         local high = slider.High or _G[slider:GetName() .. "High"]
+        local fmt = formatFn or FormatSecondsText
         if low then
-            low:SetText(FormatSecondsText(minValue or 0))
+            low:SetText(fmt(minValue or 0))
             low:SetTextColor(0.75, 0.75, 0.75) -- Light gray min label
         end
         if high then
-            high:SetText(FormatSecondsText(maxValue or 0))
+            high:SetText(fmt(maxValue or 0))
             high:SetTextColor(0.75, 0.75, 0.75) -- Light gray max label
         end
         if slider.Text then slider.Text:Hide() end
@@ -707,6 +709,8 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         local current = maxValue or 0
         if addonTable.db and addonTable.db.settings[db_category] and addonTable.db.settings[db_category][db_key] ~= nil then
             current = addonTable.db.settings[db_category][db_key]
+        elseif db_category == "stats" and db_key == "maxSessions" then
+            current = 20
         end
         current = tonumber(current) or current or (maxValue or 0)
         local minV = minValue or 0
@@ -716,7 +720,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         local isInternalSet = true
         slider:SetValue(current)
         isInternalSet = false
-        valueText:SetText(FormatSecondsText(current))
+        valueText:SetText(fmt(current))
 
         slider:SetScript("OnValueChanged", function(self, val)
             if isInternalSet then return end
@@ -729,9 +733,29 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
                 self:SetValue(rounded)
                 isInternalSet = false
             end
-            valueText:SetText(FormatSecondsText(rounded))
-            if addonTable.db and addonTable.db.settings[db_category] then
-                addonTable.db.settings[db_category][db_key] = rounded
+            valueText:SetText(fmt(rounded))
+            if addonTable.db and addonTable.db.settings then
+                if db_category and db_key then
+                    if not addonTable.db.settings[db_category] then addonTable.db.settings[db_category] = {} end
+                    addonTable.db.settings[db_category][db_key] = rounded
+                    if db_category == "coinReminder" then
+                        if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder then
+                            LootHunterDB.settings.coinReminder.reminderDelay = rounded
+                        end
+                    end
+                    if db_category == "general" and db_key == "uiScale" then
+                        if addonTable.ApplyUIScale then addonTable.ApplyUIScale(rounded) end
+                    end
+                    if db_category == "stats" and db_key == "maxSessions" then
+                        if LootHunterDB and LootHunterDB.settings then
+                            if not LootHunterDB.settings.stats then LootHunterDB.settings.stats = {} end
+                            LootHunterDB.settings.stats.maxSessions = rounded
+                        end
+                        if StatsStore and StatsStore.MAX_SESSION_LOGS then
+                            StatsStore.MAX_SESSION_LOGS = rounded
+                        end
+                    end
+                end
             end
         end)
 
@@ -889,6 +913,31 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         end
     end
 
+    local function ShowResetStatsPopup()
+        if not StaticPopupDialogs then return end
+        if not StaticPopupDialogs["LOOTHUNTER_RESET_STATS"] then
+            StaticPopupDialogs["LOOTHUNTER_RESET_STATS"] = {
+                text = L["SETTING_STATS_RESET_CONFIRM"] or "Reset all stats for this character?",
+                button1 = YES,
+                button2 = NO,
+                OnAccept = function()
+                    if addonTable.ResetAllStats then
+                        addonTable.ResetAllStats()
+                    end
+                    if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+                    if addonTable.SelectTab then addonTable.SelectTab(5) end
+                end,
+                timeout = 0,
+                whileDead = true,
+                hideOnEscape = true,
+                preferredIndex = 3,
+            }
+        else
+            StaticPopupDialogs["LOOTHUNTER_RESET_STATS"].text = L["SETTING_STATS_RESET_CONFIRM"] or StaticPopupDialogs["LOOTHUNTER_RESET_STATS"].text
+        end
+        StaticPopup_Show("LOOTHUNTER_RESET_STATS")
+    end
+
     -- ============================ 
     -- == Construir todas las categorias == 
     -- ============================ 
@@ -961,6 +1010,40 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         alertsPanel._layout[#alertsPanel._layout].afterSpacing = (alertsPanel._layout[#alertsPanel._layout].afterSpacing or 0) + 10
         ReflowPanel(alertsPanel)
     end
+
+    local statsPanel = Settings:CreateCategory("Stats", L["STATS_SETTINGS"])
+    -- Sección Stats (sin subtítulo previo)
+
+    Settings:CreateSlider(
+        statsPanel,
+        "stats.maxSessions",
+        L["SETTING_STATS_MAX_SESSIONS"],
+        1,
+        100,
+        1,
+        L["SETTING_STATS_MAX_SESSIONS_DESC"],
+        function(v) return tostring(math.floor(v or 0)) end
+    )
+    -- Salto de línea después del slider
+    if statsPanel._layout and statsPanel._layout[#statsPanel._layout] then
+        statsPanel._layout[#statsPanel._layout].afterSpacing = 18
+    end
+
+    CreateSectionHeader(statsPanel, L["SETTING_STATS_RESET_HEADER"], 0)
+    CreateDescription(statsPanel, L["SETTING_STATS_RESET_DESC"])
+    CreateButtonRow(
+        statsPanel,
+        L["SETTING_STATS_RESET_BUTTON"],
+        ShowResetStatsPopup,
+        function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(L["SETTING_STATS_RESET_BUTTON"], 1, 1, 1)
+            GameTooltip:AddLine(L["SETTING_STATS_RESET_DESC"], 0.9, 0.9, 0.9, true)
+            GameTooltip:Show()
+        end,
+        function() GameTooltip:Hide() end,
+        8
+    )
 
     local windowPanel = Settings:CreateCategory("Window", L["WINDOW_SETTINGS"])
     windowPanel._entryAfterSpacing = -2

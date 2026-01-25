@@ -5,7 +5,7 @@ local CreateGradient = addonTable.CreateGradient or function(text) return text e
 -- Variables locales de UI -
 local mainFrame = nil
 local floatBtn = nil
-local panelList, panelHelp, panelConfig, panelLog = nil, nil, nil, nil
+local panelList, panelHelp, panelConfig, panelLog, panelStats = nil, nil, nil, nil, nil
 local scrollChild = nil
 local listScrollFrame = nil
 local emptyJournalButton, emptyInstruction, emptyHeader, emptyQuote, ghostIcon, logoIcon = nil, nil, nil, nil, nil, nil
@@ -1846,6 +1846,39 @@ function LootHunter_CreateGUI()
     panelConfig:SetPoint("BOTTOMRIGHT", 0, 0)
     panelConfig:Hide()
 
+    -- PANEL STATS
+    panelStats = CreateFrame("Frame", nil, mainFrame)
+    panelStats:SetPoint("TOPLEFT", 0, -25)
+    panelStats:SetPoint("BOTTOMRIGHT", 0, 30)
+    panelStats:Hide()
+
+    local function BuildStatsPlaceholder()
+        if panelStats._placeholderBuilt then return end
+        panelStats._placeholderBuilt = true
+        local msg = panelStats:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        msg:SetPoint("CENTER", panelStats, "CENTER", 0, 0)
+        msg:SetWidth((panelStats:GetWidth() or DEFAULT_WINDOW_WIDTH) - 60)
+        msg:SetJustifyH("CENTER")
+        msg:SetWordWrap(true)
+        msg:SetText(L["STATS_PLACEHOLDER"] or (L["TAB_STATS"] or "Stats"))
+        ApplyAccentFont(msg, 14)
+    end
+    local function RefreshStatsPanel()
+        if not panelStats or panelStats._building then return end
+        panelStats._building = true
+        if addonTable.BuildStatsPanelInto then
+            local ok = pcall(addonTable.BuildStatsPanelInto, panelStats)
+            if ok then
+                panelStats._placeholderBuilt = nil
+                panelStats._building = false
+                return
+            end
+        end
+        BuildStatsPlaceholder()
+        panelStats._building = false
+    end
+    panelStats:SetScript("OnShow", RefreshStatsPanel)
+
     -- PANEL LOG
     local debugMode = IsDebugLoggingEnabled()
     panelLog = CreateFrame("Frame", nil, mainFrame)
@@ -1996,13 +2029,21 @@ function LootHunter_CreateGUI()
     tab1.bg:SetAllPoints()
     tab1.bg:SetTexture(ADDON_FOLDER .. "Textures\\backbutton.tga")
     tab1.bg:SetVertexColor(1, 1, 1, 1)
-    local tab3 = CreateFrame("Button", nil, mainFrame, "BackdropTemplate"); SetTabStyle(tab3); tab3:SetPoint("LEFT", tab1, "RIGHT", 5, 0); tab3:SetText(L["TAB_LOG"])
+    local tabStats = CreateFrame("Button", nil, mainFrame, "BackdropTemplate"); SetTabStyle(tabStats); tabStats:SetPoint("LEFT", tab1, "RIGHT", 5, 0); tabStats:SetText(L["TAB_STATS"])
+    tabStats._usePrimaryTextBlend = true
+    tabStats:SetBackdropColor(0, 0, 0, 0)
+    tabStats.bg = tabStats:CreateTexture(nil, "ARTWORK")
+    tabStats.bg:SetAllPoints()
+    tabStats.bg:SetTexture(ADDON_FOLDER .. "Textures\\backbutton.tga")
+    tabStats.bg:SetVertexColor(1, 1, 1, 1)
+    local tab3 = CreateFrame("Button", nil, mainFrame, "BackdropTemplate"); SetTabStyle(tab3); tab3:SetPoint("LEFT", tabStats, "RIGHT", 5, 0); tab3:SetText(L["TAB_LOG"])
     tab3:SetBackdropColor(0, 0, 0, 0)
     tab3.bg = tab3:CreateTexture(nil, "ARTWORK")
     tab3.bg:SetAllPoints()
     tab3.bg:SetTexture(ADDON_FOLDER .. "Textures\\backbutton.tga")
     tab3.bg:SetVertexColor(1, 1, 1, 1)
     tab1:SetFrameLevel(mainFrame:GetFrameLevel() + 6)
+    tabStats:SetFrameLevel(mainFrame:GetFrameLevel() + 6)
     tab3:SetFrameLevel(mainFrame:GetFrameLevel() + 6)
     tab3:SetShown(debugMode)
     tab3:SetEnabled(debugMode)
@@ -2096,11 +2137,13 @@ function LootHunter_CreateGUI()
     addonTable.SelectTab = function(id)
         CloseAllDropdowns()
         panelList:Hide(); panelHelp:Hide(); panelConfig:Hide(); panelLog:Hide()
-        tab1:Enable(); tab3:Enable()
+        if panelStats then panelStats:Hide() end
+        tab1:Enable(); if tabStats then tabStats:Enable() end; tab3:Enable()
         helpBtn:SetButtonState("NORMAL")
         helpBtn.active:Hide()
         if helpTopBtn then helpTopBtn:SetButtonState("NORMAL") end
         SetTabState(tab1, false)
+        if tabStats then SetTabState(tabStats, false) end
         SetTabState(tab3, false)
         if id == 1 then
             panelList:Show(); tab1:Disable()
@@ -2122,14 +2165,27 @@ function LootHunter_CreateGUI()
             end
             panelConfig:Show()
             ApplyAccentFontRecursive(panelConfig)
+        elseif id == 5 then
+            if panelStats then
+                local wasShown = panelStats:IsShown()
+                panelStats:Show()
+                if tabStats then tabStats:Disable() end
+                if wasShown or not panelStats:GetScript("OnShow") then
+                    RefreshStatsPanel()
+                end
+                ApplyAccentFontRecursive(panelStats)
+            end
         end
         if id == 1 then
             SetTabState(tab1, true)
+        elseif id == 5 and tabStats then
+            SetTabState(tabStats, true)
         elseif id == 3 then
             SetTabState(tab3, true)
         end
     end
     tab1:SetScript("OnClick", function() addonTable.SelectTab(1) end)
+    tabStats:SetScript("OnClick", function() addonTable.SelectTab(5) end)
     tab3:SetScript("OnClick", function() addonTable.SelectTab(3) end)
     local function OpenHelpPanel()
         if addonTable.SelectTab then
