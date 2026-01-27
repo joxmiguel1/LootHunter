@@ -158,6 +158,20 @@ end
 
 local function GetWallOfShame(session)
     local deaths, revives = session and session.deaths or {}, session and session.revives or {}
+    local deadTime = {}
+    if session and session.deadTime then
+        for name, seconds in pairs(session.deadTime) do
+            deadTime[name] = seconds
+        end
+    end
+    -- Include ongoing dead time even if there was no resurrect event.
+    if session and session.deathStart then
+        local now = (type(time) == "function" and time()) or (GetTime and GetTime()) or 0
+        for name, startedAt in pairs(session.deathStart) do
+            local delta = math.max(0, now - (startedAt or now))
+            deadTime[name] = (deadTime[name] or 0) + delta
+        end
+    end
     local function topEntry(tbl)
         local bestName, bestCount = nil, 0
         for name, count in pairs(tbl or {}) do
@@ -170,7 +184,36 @@ local function GetWallOfShame(session)
     end
     local deathName, deathCount = topEntry(deaths)
     local reviveName, reviveCount = topEntry(revives)
-    return deathName, deathCount, reviveName, reviveCount
+    local deadTimeName, deadTimeSeconds = topEntry(deadTime)
+    return deathName, deathCount, reviveName, reviveCount, deadTimeName, deadTimeSeconds
+end
+
+local function FormatDeadTime(seconds)
+    local total = math.max(0, seconds or 0)
+    local mins = math.floor(total / 60)
+    local hours = math.floor(mins / 60)
+    local remMins = mins - (hours * 60)
+    if hours > 0 then
+        return string.format("%dh %dm", hours, remMins)
+    end
+    return string.format("%dm", remMins)
+end
+
+local function BuildWallOfShameLines(session)
+    local lines = {}
+    if session then
+        local raidName = session.raidName or "Raid"
+        local idx = session.sessionIndex or 1
+        local dateStr = (session.startedAt and type(date) == "function") and date("%m/%d/%Y", session.startedAt) or ((type(date) == "function" and date("%m/%d/%Y")) or "")
+        local label = session.label or string.format("%s #%d - %s", raidName, idx, dateStr ~= "" and dateStr or "N/A")
+        table.insert(lines, label)
+    end
+    table.insert(lines, tostring(L["STATS_ANNOUNCE_GUILD_WALL"] or "*** WALL OF SHAME ***"))
+    local deathName, deathCount, reviveName, reviveCount, deadTimeName, deadTimeSeconds = GetWallOfShame(session)
+    table.insert(lines, string.format(L["STATS_WALL_DEATHS"] or "Most time death - %s (%s)", deathName or "N/A", deathCount or 0))
+    table.insert(lines, string.format(L["STATS_WALL_REVIVES"] or "More times revived - %s (%s)", reviveName or "N/A", reviveCount or 0))
+    table.insert(lines, string.format(L["STATS_WALL_DEADTIME"] or "Most time dead - %s (%s)", deadTimeName or "N/A", FormatDeadTime(deadTimeSeconds)))
+    return lines
 end
 
 local function AnnounceSessionToGuild(session, leaderboard)
@@ -201,9 +244,10 @@ local function AnnounceSessionToGuild(session, leaderboard)
     table.insert(lines, sep)
     table.insert(lines, row(L["STATS_ANNOUNCE_GUILD_WALL"]))
     table.insert(lines, sep)
-    local deathName, deathCount, reviveName, reviveCount = GetWallOfShame(session)
+    local deathName, deathCount, reviveName, reviveCount, deadTimeName, deadTimeSeconds = GetWallOfShame(session)
     table.insert(lines, row(string.format(L["STATS_WALL_DEATHS"], deathName or "N/A", deathCount or 0)))
     table.insert(lines, row(string.format(L["STATS_WALL_REVIVES"], reviveName or "N/A", reviveCount or 0)))
+    table.insert(lines, row(string.format(L["STATS_WALL_DEADTIME"] or "Most time dead - %s (%s)", deadTimeName or "N/A", FormatDeadTime(deadTimeSeconds))))
     table.insert(lines, sep)
     for _, line in ipairs(lines) do
         if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
@@ -756,7 +800,7 @@ local function BuildStatsPanel(frame)
     lootContainer:SetPoint("TOP", lootHeader, "BOTTOM", 0, -8)
     lootContainer:SetPoint("LEFT", colRight, "LEFT", 0, 0)
     lootContainer:SetPoint("RIGHT", colRight, "RIGHT", 0, 0)
-    lootContainer:SetHeight(185)
+    lootContainer:SetHeight(300)
     SafeSetBackdrop(lootContainer, { bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 }, { 0, 0, 0, 0.5 }, { 0, 0, 0, 0.8 })
 
     BuildLootList(lootContainer, sessionItems)
@@ -765,4 +809,39 @@ end
 
 addonTable.BuildStatsPanelInto = function(frame)
     BuildStatsPanel(frame)
+end
+
+addonTable.AnnounceWallOfShame = function(channel, sessionKey)
+    local key = sessionKey
+    if not key and addonTable.GetCurrentSessionKey then
+        key = addonTable.GetCurrentSessionKey()
+    end
+    if not key and addonTable.GetLatestSessionKey then
+        key = addonTable.GetLatestSessionKey()
+    end
+    local session = addonTable.GetSessionByKey and addonTable.GetSessionByKey(key)
+    if not session then
+        print(L["STATS_NO_SESSIONS"] or "No sessions yet")
+        return
+    end
+    local lines = BuildWallOfShameLines(session)
+    local useGuild = channel and tostring(channel):upper() == "GUILD"
+    if useGuild then
+        if not (IsInGuild and IsInGuild()) then
+            print(L["STATS_ANNOUNCE_NO_GUILD"] or "You are not in a guild.")
+            return
+        end
+        for _, line in ipairs(lines) do
+            SendChatMessage(line, "GUILD")
+        end
+        print(L["STATS_ANNOUNCE_SENT"] or "Announcement sent to guild.")
+    else
+        for _, line in ipairs(lines) do
+            if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+                DEFAULT_CHAT_FRAME:AddMessage(line)
+            else
+                print(line)
+            end
+        end
+    end
 end

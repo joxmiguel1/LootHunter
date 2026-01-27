@@ -29,6 +29,19 @@ local StatsStore = {
     currentHistory = nil,
     currentSessionKey = nil,
 }
+local function NowSeconds()
+    if type(time) == "function" then
+        return time()
+    end
+    if GetTime then
+        return GetTime()
+    end
+    return 0
+end
+local function NormalizeUnitName(name)
+    if not name or name == "" then return name end
+    return name:match("^[^-]+") or name
+end
 local function SafeLeaveLFG()
     if LeaveLFG then
         local ok = pcall(LeaveLFG, _G.LE_LFG_CATEGORY_LFD or 1)
@@ -62,6 +75,7 @@ local ITEM_SUBCLASS_MOUNT = _G.LE_ITEM_MISCELLANEOUS_MOUNT or (_G.Enum and _G.En
 -- Variables para la base de datos del personaje actual
 local CurrentCharDB = nil 
 local refresh_timer = nil
+local tradeActive = false
 -- Iconos de Raid
 local ICON_STAR = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:24|t"
 local ICON_DIAMOND = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_3:24|t"
@@ -288,6 +302,8 @@ function StatsStore:StartSession(raidName, difficultyName, instanceID)
         perPlayer = {},
         deaths = {},
         revives = {},
+        deadTime = {},
+        deathStart = {},
         label = self:BuildSessionLabel(raidName, idx, startedAt),
     }
     self.currentSessionKey = key
@@ -309,6 +325,8 @@ function StatsStore:EnsureCurrentSession()
         if sess.raidName == raidName and (not sess.instanceID or not instanceID or sess.instanceID == instanceID) then
             sess.deaths = sess.deaths or {}
             sess.revives = sess.revives or {}
+            sess.deadTime = sess.deadTime or {}
+            sess.deathStart = sess.deathStart or {}
             return self.currentSessionKey, sess
         end
     end
@@ -317,6 +335,8 @@ function StatsStore:EnsureCurrentSession()
         self.currentSessionKey = recent.key
         recent.deaths = recent.deaths or {}
         recent.revives = recent.revives or {}
+        recent.deadTime = recent.deadTime or {}
+        recent.deathStart = recent.deathStart or {}
         return recent.key, recent
     end
     return self:StartSession(raidName, difficultyName, instanceID)
@@ -354,6 +374,13 @@ end
 function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, rollValue, wonViaRoll, boss, isBonusLoot)
     local key, session = self:EnsureCurrentSession()
     if not key or not session then return end
+    -- Skip poor/common-quality items (gray/white) in the session drop log.
+    if itemID and GetItemInfo then
+        local _, _, quality = GetItemInfo(itemID)
+        if quality ~= nil and quality <= 1 then
+            return
+        end
+    end
     local icon = nil
     if itemID then
         icon = select(10, GetItemInfo(itemID))
@@ -435,10 +462,29 @@ function StatsStore:AddDeath(name)
     if not session then return end
     name = name or "Unknown"
     session.deaths = session.deaths or {}
+    session.deathStart = session.deathStart or {}
     session.deaths[name] = (session.deaths[name] or 0) + 1
+    if not session.deathStart[name] then
+        session.deathStart[name] = NowSeconds()
+    end
 end
 
 function StatsStore:AddRevive(name)
+    name = name or "Unknown"
+    local _, session = self:EnsureCurrentSession()
+    if not session and self.currentSessionKey then
+        local db = self:EnsureSessionDB()
+        if db and db.sessions then
+            session = db.sessions[self.currentSessionKey]
+        end
+    end
+    if not session then return end
+    session.revives = session.revives or {}
+    session.revives[name] = (session.revives[name] or 0) + 1
+    self:EndDeathTimer(name)
+end
+
+function StatsStore:EndDeathTimer(name)
     local _, session = self:EnsureCurrentSession()
     if not session and self.currentSessionKey then
         local db = self:EnsureSessionDB()
@@ -448,8 +494,14 @@ function StatsStore:AddRevive(name)
     end
     if not session then return end
     name = name or "Unknown"
-    session.revives = session.revives or {}
-    session.revives[name] = (session.revives[name] or 0) + 1
+    session.deathStart = session.deathStart or {}
+    session.deadTime = session.deadTime or {}
+    local startedAt = session.deathStart[name]
+    if startedAt then
+        local delta = math.max(0, NowSeconds() - startedAt)
+        session.deadTime[name] = (session.deadTime[name] or 0) + delta
+        session.deathStart[name] = nil
+    end
 end
 
 function StatsStore:GetLatestSessionKey()
@@ -644,6 +696,7 @@ local dropBatchCount = 0
 local suppressOtherWonUntil = 0
 local PendingCoinReminders = {}
 local LastCoinReminderBoss = nil
+local lastCoinUsedAt = 0
 local TriggerLootReadyTimers
 local COIN_REMINDER_DELAY = 4
 local COIN_REMINDER_MIN_WAIT = 30
@@ -1485,6 +1538,10 @@ local function ProcessCoinReminder(key)
         LogCoinDebug(string.format("Coin reminder for %s canceled: no items pending.", entry.boss or "Unknown"))
         return 
     end
+    StatsStore:RecordHistoryEvent("coin_reminder", { boss = entry.boss, player = UnitName("player") })
+    if not entry.dropSeen then
+        StatsStore:RecordHistoryEvent("boss_no_loot", { boss = entry.boss, player = UnitName("player") })
+    end
     if LootHunterDB.settings.coinReminder.visualAlert then
         local chatFmt = L["COIN_REMINDER_RAID_CHAT"] or L["COIN_REMINDER_RAID_MSG"]
         local chatMsg = string.format(chatFmt, entry.boss)
@@ -1642,9 +1699,18 @@ local function HasBonusRollBuff()
     end
     return false
 end
+local function RecordCoinUsedOnce(reason)
+    local now = GetTime and GetTime() or 0
+    if (now - (lastCoinUsedAt or 0)) < 5 then
+        return
+    end
+    lastCoinUsedAt = now
+    StatsStore:RecordHistoryEvent("coin_used", { boss = LastCoinReminderBoss, player = UnitName("player"), reason = reason })
+end
 local function HandleBonusRollActivate(event, ...)
     LogCoinDebug("|cff00ffff[Coin Debug]|r BONUS_ROLL_ACTIVATE received")
     LogCoinDebug(string.format("Bonus roll window visible: %s", tostring(IsBonusRollWindowVisible())))
+    RecordCoinUsedOnce("bonus_roll_activate")
     -- Iniciar secuencia de 2 fases (10s aviso -> 35s alerta)
     ActivatePendingForBonusRoll("bonus_roll_activate")
 end
@@ -2006,7 +2072,7 @@ local function HandleChatLoot(event, msg, ...)
                 playerName = capturedPlayer
                 itemLink = capturedItemLink2
                 isMine = (playerName == UnitName("player"))
-                lootViaBonusRoll = pattern.isBonusRoll and not isMine
+                lootViaBonusRoll = pattern.isBonusRoll or false
                 break
             end
         end
@@ -2025,7 +2091,10 @@ local function HandleChatLoot(event, msg, ...)
     TriggerLootActivityTimerForItemID(id)
     -- Log de sesión para cualquier loot (tracked o no)
     local playerRollValue = isMine and GetRecentPlayerRollForItem(id) or nil
-    StatsStore:AddSessionLootEntry(id, itemLink, playerName or (isMine and UnitName("player")) or playerName, nil, playerRollValue, playerRollValue ~= nil, nil, lootViaBonusRoll)
+    local skipSessionLog = tradeActive and isMine
+    if not skipSessionLog then
+        StatsStore:AddSessionLootEntry(id, itemLink, playerName or (isMine and UnitName("player")) or playerName, nil, playerRollValue, playerRollValue ~= nil, nil, lootViaBonusRoll)
+    end
     if CurrentCharDB[id] then
         local itemData = CurrentCharDB[id]
         if isMine then
@@ -2157,15 +2226,67 @@ local function HandleCombatLogEvent()
     end
     local function IsPlayerFlag(flags)
         if not flags then return false end
-        local band = bit and bit.band
         local COMBATLOG_OBJECT_TYPE_PLAYER = _G.COMBATLOG_OBJECT_TYPE_PLAYER or 0x00000400
+        if CombatLog_Object_IsA then
+            return CombatLog_Object_IsA(flags, COMBATLOG_OBJECT_TYPE_PLAYER)
+        end
+        local band = (bit and bit.band) or (bit32 and bit32.band)
         return band and band(flags, COMBATLOG_OBJECT_TYPE_PLAYER) > 0
     end
+    local function IsGroupMemberName(normName)
+        if not normName or normName == "" then return false end
+        if normName == NormalizeUnitName(UnitName("player")) then return true end
+        if IsInRaid() then
+            for i = 1, GetNumGroupMembers() do
+                local unit = "raid" .. i
+                if NormalizeUnitName(UnitName(unit)) == normName then
+                    return true
+                end
+            end
+            return false
+        end
+        if IsInGroup() then
+            for i = 1, GetNumSubgroupMembers() do
+                local unit = "party" .. i
+                if NormalizeUnitName(UnitName(unit)) == normName then
+                    return true
+                end
+            end
+        end
+        return false
+    end
     local normDest = NormalizeSimple(destName)
-    if subEvent == "UNIT_DIED" and normDest and IsPlayerFlag(destFlags) then
+    local isPlayerOrMember = normDest and (IsPlayerFlag(destFlags) or IsGroupMemberName(normDest))
+    if subEvent == "UNIT_DIED" and isPlayerOrMember then
         StatsStore:AddDeath(normDest)
-    elseif subEvent == "SPELL_RESURRECT" and normDest and IsPlayerFlag(destFlags) then
+    elseif subEvent == "SPELL_RESURRECT" and isPlayerOrMember then
         StatsStore:AddRevive(normDest)
+    end
+end
+
+local function HandleTradeShow()
+    tradeActive = true
+end
+
+local function HandleTradeClosed()
+    tradeActive = false
+end
+
+local function IsTrackableUnit(unit)
+    if not unit then return false end
+    if unit == "player" then return true end
+    if unit:match("^party%d+$") or unit:match("^raid%d+$") then return true end
+    return false
+end
+
+local function HandleUnitLifeState(event, unit)
+    if not IsTrackableUnit(unit) then return end
+    if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then return end
+    local name = UnitName(unit)
+    if not name or name == "" then return end
+    name = NormalizeUnitName(name)
+    if StatsStore and StatsStore.EndDeathTimer then
+        StatsStore:EndDeathTimer(name)
     end
 end
 local function PlayOtherWonSound(force)
@@ -2627,6 +2748,10 @@ local eventHandlers = {
     CHAT_MSG_PARTY_LEADER = HandleChatLinkAnnounce,
     START_LOOT_ROLL = HandleStartLootRoll,
     COMBAT_LOG_EVENT_UNFILTERED = HandleCombatLogEvent,
+    UNIT_HEALTH = HandleUnitLifeState,
+    UNIT_FLAGS = HandleUnitLifeState,
+    TRADE_SHOW = HandleTradeShow,
+    TRADE_CLOSED = HandleTradeClosed,
     PLAYER_SPECIALIZATION_CHANGED = HandleSpecChange,
     ACTIVE_TALENT_GROUP_CHANGED = HandleSpecChange,
     PLAYER_TALENT_UPDATE = HandleSpecChange,
@@ -2651,12 +2776,15 @@ frame:RegisterEvent("LOOT_READY")
 frame:RegisterEvent("LOOT_OPENED")
 frame:RegisterEvent("BONUS_ROLL_ACTIVATE")
 frame:RegisterUnitEvent("UNIT_AURA", "player")
+frame:RegisterEvent("UNIT_HEALTH")
+frame:RegisterEvent("UNIT_FLAGS")
 frame:RegisterEvent("CHAT_MSG_RAID")
 frame:RegisterEvent("CHAT_MSG_RAID_LEADER")
 frame:RegisterEvent("CHAT_MSG_RAID_WARNING")
 frame:RegisterEvent("CHAT_MSG_PARTY")
 frame:RegisterEvent("CHAT_MSG_PARTY_LEADER")
 frame:RegisterEvent("START_LOOT_ROLL")
+frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 frame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 frame:RegisterEvent("PLAYER_TALENT_UPDATE")
@@ -2664,6 +2792,8 @@ frame:RegisterEvent("MERCHANT_SHOW")
 frame:RegisterEvent("MERCHANT_UPDATE")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+frame:RegisterEvent("TRADE_SHOW")
+frame:RegisterEvent("TRADE_CLOSED")
 -- === CACHE DE LOOT (EJ) ===
 local LootSourceCache = {}
 local StaticDBBuilt = false
@@ -3151,5 +3281,23 @@ SlashCmdList["LOOTHUNTER_WON"] = function(msg)
             end)
             print(string.format(L["CONGRATS_CHAT_MSG"], itemLine))
         end
+    end
+end
+
+SLASH_LOOTHUNTER_WALL1 = "/lh_wall"
+SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
+    if addonTable and addonTable.AnnounceWallOfShame then
+        addonTable.AnnounceWallOfShame("LOCAL")
+    else
+        print("[Loot Hunter] Wall of shame is not available.")
+    end
+end
+
+SLASH_LOOTHUNTER_WALL_GUILD1 = "/lh_wall_guild"
+SlashCmdList["LOOTHUNTER_WALL_GUILD"] = function(msg)
+    if addonTable and addonTable.AnnounceWallOfShame then
+        addonTable.AnnounceWallOfShame("GUILD")
+    else
+        print("[Loot Hunter] Wall of shame is not available.")
     end
 end
