@@ -1,8 +1,6 @@
 All notable changes to this project will be documented in this file.
 
 ## v1.1
-- Added full Stats tab with session selector, leaderboard (new podium icons), loot list icons for direct/roll/bonus, and wall-of-shame tracking (deaths/resurrections) per session.
-- Guild announce button on the leaderboard now prints a structured summary (top 3 + wall of shame) to your chat (kept local for testing).
 - Bonus roll loot from any player is now recorded in session drops; rolls you win are shown with dice + roll value.
 - Stats settings: slider to choose how many raid sessions to keep (1–100, default 20) and refined clear-raid-history section.
 - UI polish: reduced Stats title spacing, smaller loot list icons, percentage colors for Pending/Won, adjusted empty/leaderboard text colors.
