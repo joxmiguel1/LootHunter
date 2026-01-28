@@ -938,6 +938,31 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         StaticPopup_Show("LOOTHUNTER_RESET_STATS")
     end
 
+    local function ShowResetHistoryPopup()
+        if not StaticPopupDialogs then return end
+        if not StaticPopupDialogs["LOOTHUNTER_RESET_HISTORY"] then
+            StaticPopupDialogs["LOOTHUNTER_RESET_HISTORY"] = {
+                text = L["SETTING_STATS_HISTORY_RESET_CONFIRM"] or "Reset history counters for this character?",
+                button1 = YES,
+                button2 = NO,
+                OnAccept = function()
+                    if addonTable.ResetHistory then
+                        addonTable.ResetHistory()
+                    end
+                    if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+                    if addonTable.SelectTab then addonTable.SelectTab(5) end
+                end,
+                timeout = 0,
+                whileDead = true,
+                hideOnEscape = true,
+                preferredIndex = 3,
+            }
+        else
+            StaticPopupDialogs["LOOTHUNTER_RESET_HISTORY"].text = L["SETTING_STATS_HISTORY_RESET_CONFIRM"] or StaticPopupDialogs["LOOTHUNTER_RESET_HISTORY"].text
+        end
+        StaticPopup_Show("LOOTHUNTER_RESET_HISTORY")
+    end
+
     -- ============================ 
     -- == Construir todas las categorias == 
     -- ============================ 
@@ -1019,7 +1044,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         "stats.maxSessions",
         L["SETTING_STATS_MAX_SESSIONS"],
         1,
-        100,
+        50,
         1,
         L["SETTING_STATS_MAX_SESSIONS_DESC"],
         function(v) return tostring(math.floor(v or 0)) end
@@ -1039,6 +1064,22 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine(L["SETTING_STATS_RESET_BUTTON"], 1, 1, 1)
             GameTooltip:AddLine(L["SETTING_STATS_RESET_DESC"], 0.9, 0.9, 0.9, true)
+            GameTooltip:Show()
+        end,
+        function() GameTooltip:Hide() end,
+        8
+    )
+
+    CreateSectionHeader(statsPanel, L["SETTING_STATS_HISTORY_RESET_HEADER"], 0)
+    CreateDescription(statsPanel, L["SETTING_STATS_HISTORY_RESET_DESC"])
+    CreateButtonRow(
+        statsPanel,
+        L["SETTING_STATS_HISTORY_RESET_BUTTON"],
+        ShowResetHistoryPopup,
+        function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(L["SETTING_STATS_HISTORY_RESET_BUTTON"], 1, 1, 1)
+            GameTooltip:AddLine(L["SETTING_STATS_HISTORY_RESET_DESC"], 0.9, 0.9, 0.9, true)
             GameTooltip:Show()
         end,
         function() GameTooltip:Hide() end,

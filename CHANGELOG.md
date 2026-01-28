@@ -1,9 +1,9 @@
 All notable changes to this project will be documented in this file.
 
 ## v1.1
-- Bonus roll loot from any player is now recorded in session drops; rolls you win are shown with dice + roll value.
-- Stats settings: slider to choose how many raid sessions to keep (1–100, default 20) and refined clear-raid-history section.
-- UI polish: reduced Stats title spacing, smaller loot list icons, percentage colors for Pending/Won, adjusted empty/leaderboard text colors.
+- Stats tab: Current List counters (tracked/pending/won/priority), History counters (drops/wins/losses/coin reminders/coins used/boss-no-loot/time since last win), session selector, and session drop list with loot source icons (direct drop, roll, bonus roll).
+- Settings (Stats): max sessions slider plus two reset actions (raid sessions reset and History-only reset).
+- Wall of Shame: shows the selected session and the top deaths/revives/time dead; use `/lh_wall` and choose Local, Guild, or Raid.
 
 ## v1.0.5  
 - Coin reminder no longer repeats during bonus roll; only WIN shows for tracked loot you win.  

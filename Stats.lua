@@ -266,15 +266,15 @@ local function EnsureSessionSelection()
         return list
     end
     local currentKey = addonTable.GetCurrentSessionKey and addonTable.GetCurrentSessionKey()
-    if currentKey then
-        for _, entry in ipairs(list) do
-            if entry.key == currentKey then
-                selectedSessionKey = currentKey
-                return list
+    if not selectedSessionKey then
+        if currentKey then
+            for _, entry in ipairs(list) do
+                if entry.key == currentKey then
+                    selectedSessionKey = currentKey
+                    return list
+                end
             end
         end
-    end
-    if not selectedSessionKey then
         selectedSessionKey = list[1].key
         return list
     end
@@ -658,6 +658,7 @@ local function BuildStatsPanel(frame)
 
     -- Session context
     local sessionList = EnsureSessionSelection()
+    addonTable.SelectedSessionKey = selectedSessionKey
     local sessionKey = selectedSessionKey
     local sessionLabel = L["STATS_NO_SESSIONS"] or "No sessions yet"
     if sessionList and #sessionList > 0 then
@@ -813,6 +814,9 @@ end
 
 addonTable.AnnounceWallOfShame = function(channel, sessionKey)
     local key = sessionKey
+    if not key and addonTable.SelectedSessionKey then
+        key = addonTable.SelectedSessionKey
+    end
     if not key and addonTable.GetCurrentSessionKey then
         key = addonTable.GetCurrentSessionKey()
     end
@@ -825,14 +829,29 @@ addonTable.AnnounceWallOfShame = function(channel, sessionKey)
         return
     end
     local lines = BuildWallOfShameLines(session)
-    local useGuild = channel and tostring(channel):upper() == "GUILD"
-    if useGuild then
+    local function SanitizeForChat(text)
+        text = tostring(text or "")
+        text = text:gsub("|T.-|t", "{skull}")
+        return text
+    end
+    local sendChannel = channel and tostring(channel):upper() or "LOCAL"
+    if sendChannel ~= "LOCAL" then
         if not (IsInGuild and IsInGuild()) then
-            print(L["STATS_ANNOUNCE_NO_GUILD"] or "You are not in a guild.")
-            return
+            if sendChannel == "GUILD" then
+                print(L["STATS_ANNOUNCE_NO_GUILD"] or "You are not in a guild.")
+                return
+            end
         end
-        for _, line in ipairs(lines) do
-            SendChatMessage(line, "GUILD")
+        if C_Timer and C_Timer.After then
+            for i, line in ipairs(lines) do
+                C_Timer.After((i - 1) * 0.2, function()
+                    SendChatMessage(SanitizeForChat(line), sendChannel)
+                end)
+            end
+        else
+            for _, line in ipairs(lines) do
+                SendChatMessage(SanitizeForChat(line), sendChannel)
+            end
         end
         print(L["STATS_ANNOUNCE_SENT"] or "Announcement sent to guild.")
     else

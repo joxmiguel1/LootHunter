@@ -36,6 +36,17 @@ This addon eliminates human error from your raids:
 
  
 
+## 📊 Stats Tab
+
+Track your progress over time:
+
+*   **Current List:** Items tracked, pending, won, and priority counts.
+*   **History:** Drops detected, wins, losses, coin reminders, coins used, bosses without your loot, and time since last win.
+*   **Sessions:** Select a raid session to review its drops with loot source icons.
+*   **Wall of Shame:** Quick summary of most deaths, most revives, and most time dead for the selected session.
+*   **Wall of Shame Command:** `/lh_wall` opens a dialog to choose Local, Guild, or Raid.
+
+
 ## 🎮 How to use it (It couldn't be easier)
 
 1.  Open the **Dungeon Journal** (`Shift+J`) or a gear vendor.
@@ -43,7 +54,6 @@ This addon eliminates human error from your raids:
 3.  **Shift+Click** the item.
 4.  **Done!** You can close everything now. Loot Hunter will watch that item for you forever.
 
-undefined
 
 ## 🗺️ Minimap Button
 

@@ -249,6 +249,21 @@ function StatsStore:ResetAllStats()
 end
 addonTable.ResetAllStats = function() return StatsStore:ResetAllStats() end
 
+function StatsStore:ResetHistory()
+    if not LootHunterDB or not charKey then return false end
+    if LootHunterDB.History then
+        LootHunterDB.History[charKey] = {
+            events = {},
+            counters = {},
+            lastWinAt = nil,
+        }
+    end
+    self.currentHistory = nil
+    self:EnsureHistoryDB()
+    return true
+end
+addonTable.ResetHistory = function() return StatsStore:ResetHistory() end
+
 function StatsStore:EnsureSessionDB()
     if not LootHunterDB or not charKey then return nil end
     if not LootHunterDB.Sessions then LootHunterDB.Sessions = {} end
@@ -329,6 +344,10 @@ function StatsStore:EnsureCurrentSession()
             sess.deathStart = sess.deathStart or {}
             return self.currentSessionKey, sess
         end
+    end
+    if self.forceNewSession then
+        self.forceNewSession = nil
+        return self:StartSession(raidName, difficultyName, instanceID)
     end
     local recent = self:GetMostRecentSession(raidName, instanceID)
     if recent then
@@ -419,8 +438,10 @@ function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, ro
             local sb = db.sessions[b] and db.sessions[b].startedAt or 0
             return sa > sb
         end)
-        if #keys > self.MAX_SESSION_LOGS then
-            for i = self.MAX_SESSION_LOGS + 1, #keys do
+        local limit = tonumber(self.MAX_SESSION_LOGS) or 20
+        if limit < 1 then limit = 1 end
+        if #keys > limit then
+            for i = limit + 1, #keys do
                 db.sessions[keys[i]] = nil
             end
         end
@@ -697,6 +718,10 @@ local suppressOtherWonUntil = 0
 local PendingCoinReminders = {}
 local LastCoinReminderBoss = nil
 local lastCoinUsedAt = 0
+local lastInRaid = false
+local pendingRaidExitCheck = false
+local lastBonusRollItemID = nil
+local lastBonusRollTime = 0
 local TriggerLootReadyTimers
 local COIN_REMINDER_DELAY = 4
 local COIN_REMINDER_MIN_WAIT = 30
@@ -807,7 +832,10 @@ local function InitializeSettings()
             language = "AUTO",
             helpSeen = false,
             uiScale = 1.0,
-        }
+        },
+        stats = {
+            maxSessions = 25,
+        },
     }
     if not LootHunterDB.settings then
         LootHunterDB.settings = defaults
@@ -832,6 +860,11 @@ local function InitializeSettings()
         if not valid[scope] then
             LootHunterDB.settings.lootAlerts.lostAlertScope = "RAID"
         end
+    end
+    if LootHunterDB.settings and LootHunterDB.settings.stats and LootHunterDB.settings.stats.maxSessions then
+        local maxSessions = tonumber(LootHunterDB.settings.stats.maxSessions) or 25
+        maxSessions = math.max(1, math.min(50, maxSessions))
+        StatsStore.MAX_SESSION_LOGS = maxSessions
     end
 end
 
@@ -1714,6 +1747,16 @@ local function HandleBonusRollActivate(event, ...)
     -- Iniciar secuencia de 2 fases (10s aviso -> 35s alerta)
     ActivatePendingForBonusRoll("bonus_roll_activate")
 end
+local function HandleBonusRollResult(event, rollID, result, rewardType, itemID, itemLink)
+    local id = itemID
+    if not id and type(itemLink) == "string" then
+        id = tonumber(itemLink:match("item:(%d+):"))
+    end
+    if id then
+        lastBonusRollItemID = id
+        lastBonusRollTime = GetTime and GetTime() or 0
+    end
+end
 local function HandleUnitAura(event, unit)
     if unit ~= "player" then return end
     if HasBonusRollBuff() then
@@ -1989,6 +2032,28 @@ local function HandleInstanceChange(event)
     if UpdateRaidChatFilter then
         UpdateRaidChatFilter()
     end
+    local inInstance, instanceType = IsInInstance()
+    local nowInRaid = inInstance and instanceType == "raid"
+    local stillInRaidGroup = IsInRaid and IsInRaid() or false
+    if lastInRaid and not nowInRaid and not stillInRaidGroup then
+        if not pendingRaidExitCheck and C_Timer and C_Timer.After then
+            pendingRaidExitCheck = true
+            C_Timer.After(6, function()
+                pendingRaidExitCheck = false
+                local inInst2, instType2 = IsInInstance()
+                local nowInRaid2 = inInst2 and instType2 == "raid"
+                local stillInRaidGroup2 = IsInRaid and IsInRaid() or false
+                if (not nowInRaid2) and (not stillInRaidGroup2) then
+                    if StatsStore then
+                        StatsStore.currentSessionKey = nil
+                        StatsStore.forceNewSession = true
+                    end
+                end
+                StatsStore:EnsureCurrentSession()
+            end)
+        end
+    end
+    lastInRaid = nowInRaid
     StatsStore:EnsureCurrentSession()
 end
 
@@ -2080,6 +2145,12 @@ local function HandleChatLoot(event, msg, ...)
     if not itemLink then return end
     local id = tonumber(string.match(itemLink, "item:(%d+):"))
     if not id then return end
+    if not lootViaBonusRoll and lastBonusRollItemID and id == lastBonusRollItemID then
+        local now = GetTime and GetTime() or 0
+        if (now - (lastBonusRollTime or 0)) <= 12 then
+            lootViaBonusRoll = true
+        end
+    end
     if LogDebug then
         LogDebug(string.format("|cff00ff00[Alert]|r Loot chat detected: item=%s (id=%s) source=%s player=%s tracked=%s",
             tostring(itemLink),
@@ -2736,6 +2807,7 @@ local eventHandlers = {
     LOOT_READY = HandleLootEvent,
     LOOT_OPENED = HandleLootEvent,
     BONUS_ROLL_ACTIVATE = HandleBonusRollActivate,
+    BONUS_ROLL_RESULT = HandleBonusRollResult,
     UNIT_AURA = HandleUnitAura,
     BOSS_KILL = HandleBossKill,
     ENCOUNTER_END = HandleEncounterEnd,
@@ -2775,6 +2847,7 @@ frame:RegisterEvent("ENCOUNTER_END")
 frame:RegisterEvent("LOOT_READY")
 frame:RegisterEvent("LOOT_OPENED")
 frame:RegisterEvent("BONUS_ROLL_ACTIVATE")
+frame:RegisterEvent("BONUS_ROLL_RESULT")
 frame:RegisterUnitEvent("UNIT_AURA", "player")
 frame:RegisterEvent("UNIT_HEALTH")
 frame:RegisterEvent("UNIT_FLAGS")
@@ -3286,18 +3359,39 @@ end
 
 SLASH_LOOTHUNTER_WALL1 = "/lh_wall"
 SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
-    if addonTable and addonTable.AnnounceWallOfShame then
+    if not addonTable or not addonTable.AnnounceWallOfShame then
+        print("[Loot Hunter] Wall of shame is not available.")
+        return
+    end
+    if not StaticPopupDialogs then
         addonTable.AnnounceWallOfShame("LOCAL")
-    else
-        print("[Loot Hunter] Wall of shame is not available.")
+        return
     end
-end
-
-SLASH_LOOTHUNTER_WALL_GUILD1 = "/lh_wall_guild"
-SlashCmdList["LOOTHUNTER_WALL_GUILD"] = function(msg)
-    if addonTable and addonTable.AnnounceWallOfShame then
-        addonTable.AnnounceWallOfShame("GUILD")
+    if not StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"] then
+        StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"] = {
+            text = L["STATS_WALL_CHANNEL_PROMPT"] or "Where do you want to announce the Wall of Shame?",
+            button1 = L["STATS_WALL_CHANNEL_LOCAL"] or "Local",
+            button2 = L["STATS_WALL_CHANNEL_GUILD"] or "Guild",
+            button3 = L["STATS_WALL_CHANNEL_RAID"] or "Raid",
+            OnAccept = function()
+                addonTable.AnnounceWallOfShame("LOCAL")
+            end,
+            OnCancel = function()
+                addonTable.AnnounceWallOfShame("GUILD")
+            end,
+            OnAlt = function()
+                addonTable.AnnounceWallOfShame("RAID")
+            end,
+            timeout = 0,
+            whileDead = true,
+            hideOnEscape = true,
+            preferredIndex = 3,
+        }
     else
-        print("[Loot Hunter] Wall of shame is not available.")
+        StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].text = L["STATS_WALL_CHANNEL_PROMPT"] or StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].text
+        StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button1 = L["STATS_WALL_CHANNEL_LOCAL"] or StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button1
+        StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button2 = L["STATS_WALL_CHANNEL_GUILD"] or StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button2
+        StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button3 = L["STATS_WALL_CHANNEL_RAID"] or StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button3
     end
+    StaticPopup_Show("LOOTHUNTER_WALL_CHANNEL")
 end

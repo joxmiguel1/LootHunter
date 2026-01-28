@@ -33,6 +33,17 @@ Este addon elimina el error humano de tus raids:
 
 ***
 
+## 📊 Estadisticas
+
+Sigue tu progreso con la pestaña de estadisticas:
+
+*   **Lista actual:** objetos rastreados, pendientes, ganados y prioritarios.
+*   **Historial:** drops detectados, ganados, perdidos, recordatorios de moneda, monedas usadas, jefes sin tu loot y tiempo desde el último win.
+*   **Sesiones:** selecciona una sesión de raid y revisa sus drops con iconos de origen.
+*   **Muro de la vergüenza:** resumen de más muertes, más resurrecciones y más tiempo muerto de la sesión seleccionada.
+*   **Comando Wall of Shame:** `/lh_wall` abre un diálogo para elegir Local, Hermandad o Raid.
+
+
 ## 🎮 Cómo usarlo (No podría ser más fácil)
 
 1.  Abre el **Diario de Mazmorras** (`Shift+J`).
