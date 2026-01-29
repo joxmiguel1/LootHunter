@@ -1,5 +1,6 @@
 local addonName, addonTable = ...
 local L = addonTable.L
+local StatsStore = addonTable.StatsStore
 
 local isBuilt = false
 local selectedCategory = nil

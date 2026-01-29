@@ -62,6 +62,20 @@ Sigue tu progreso con la pestaña de estadisticas:
 *   `/loothunter` o `/lh`: Abre la ventana principal.
 *   `/loothunter_debug`: Activa la pestaña de depuración (útil para reportar errores).
 
+## 🔌 API del Addon (Favoritos)
+
+LootHunter expone un pequeño API publico para addons de terceros:
+
+```lua
+-- boolean, string
+local isFav, label = LootHunterAPI:IsFavorite(itemID)
+```
+
+Comportamiento:
+
+*   Devuelve `true` si el item esta en tu lista Pendiente (no Ganado y no equipado).
+*   `label` es una etiqueta corta para UI (por ejemplo `|TInterface\\AddOns\\LootHunter\\Textures\\minimap_icon.tga:16|t LH`).
+
 ***
 
 ## 📝 Notas

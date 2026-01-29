@@ -504,10 +504,38 @@ local function BuildLootList(parent, items)
         return c.r or 1, c.g or 1, c.b or 1
     end
 
-    local rowHeight = 20
-    local y = -2
-    for idx = #items, 1, -1 do
-        local info = items[idx]
+    local function GetQualityFromEntry(info)
+        if not info then return nil end
+        local quality = info.quality
+        if quality ~= nil then
+            return quality
+        end
+        quality = nil
+        if info.itemID and C_Item and C_Item.GetItemQualityByID then
+            quality = C_Item.GetItemQualityByID(info.itemID)
+        end
+        if not quality and info.itemID and GetItemInfo then
+            quality = select(3, GetItemInfo(info.itemID))
+        end
+        if not quality and info.link and GetItemInfo then
+            quality = select(3, GetItemInfo(info.link))
+        end
+        if not quality and info.link and type(info.link) == "string" and _G.ITEM_QUALITY_COLORS then
+            local hex = info.link:match("|c(%x%x%x%x%x%x%x%x)")
+            if hex then
+                hex = hex:lower()
+                for q, data in pairs(_G.ITEM_QUALITY_COLORS) do
+                    if data and data.colorHex and data.colorHex:lower() == hex then
+                        quality = q
+                        break
+                    end
+                end
+            end
+        end
+        return quality
+    end
+
+    local function AddLootRow(info, y, rowHeight)
         local row = CreateFrame("Frame", nil, child)
         row:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
         row:SetPoint("RIGHT", child, "RIGHT", 0, 0)
@@ -589,9 +617,65 @@ local function BuildLootList(parent, items)
         row:SetScript("OnLeave", function()
             if GameTooltip then GameTooltip:Hide() end
         end)
-
-        y = y - rowHeight
+        return y - rowHeight
     end
+
+    local rowHeight = 20
+    local y = -2
+
+    local function AddSection(title, count, entries, titleColor, useGradient)
+        if not entries or #entries == 0 then return end
+        local header = child:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        header:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
+        local label = string.format("%s (%d)", title or "", count or 0)
+        if useGradient and addonTable.CreateGradient then
+            label = addonTable.CreateGradient(label, 1, 0.85, 0.35, 1, 0.75, 0)
+            header:SetText(label)
+        else
+            header:SetText(label)
+            if titleColor then
+                header:SetTextColor(titleColor[1] or 1, titleColor[2] or 1, titleColor[3] or 1)
+            end
+        end
+        SetAccentFont(header, 12, "OUTLINE")
+        y = y - 18
+        for _, info in ipairs(entries) do
+            y = AddLootRow(info, y, rowHeight)
+        end
+        y = y - 6
+    end
+
+    local legendaryItems = {}
+    local epicItems = {}
+    local rareItems = {}
+    local uncommonItems = {}
+    for idx = #items, 1, -1 do
+        local info = items[idx]
+        local quality = GetQualityFromEntry(info)
+        if quality == 5 then
+            legendaryItems[#legendaryItems + 1] = info
+        elseif quality == 4 then
+            epicItems[#epicItems + 1] = info
+        elseif quality == 3 then
+            rareItems[#rareItems + 1] = info
+        elseif quality == 2 then
+            uncommonItems[#uncommonItems + 1] = info
+        end
+    end
+
+    local legendLabel = L["STATS_LOOT_LEGENDARY"] or "Legendary"
+    local epicLabel = L["STATS_LOOT_EPIC"] or "Epic"
+    local rareLabel = L["STATS_LOOT_RARE"] or "Rare"
+    local uncommonLabel = L["STATS_LOOT_UNCOMMON"] or "Uncommon"
+    local qualityColors = _G.ITEM_QUALITY_COLORS or {}
+    local epicColor = qualityColors[4] and { qualityColors[4].r, qualityColors[4].g, qualityColors[4].b } or { 0.64, 0.21, 0.93 }
+    local rareColor = qualityColors[3] and { qualityColors[3].r, qualityColors[3].g, qualityColors[3].b } or { 0, 0.44, 0.87 }
+    local uncommonColor = qualityColors[2] and { qualityColors[2].r, qualityColors[2].g, qualityColors[2].b } or { 0.12, 1, 0 }
+
+    AddSection(legendLabel, #legendaryItems, legendaryItems, nil, true)
+    AddSection(epicLabel, #epicItems, epicItems, epicColor, false)
+    AddSection(rareLabel, #rareItems, rareItems, rareColor, false)
+    AddSection(uncommonLabel, #uncommonItems, uncommonItems, uncommonColor, false)
 
     child:SetHeight(math.abs(y) + 10)
 end

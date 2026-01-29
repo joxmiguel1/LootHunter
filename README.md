@@ -65,11 +65,25 @@ Track your progress over time:
 *   `/loothunter` or `/lh`: Opens the main window.
 *   `/loothunter_debug`: Enable the debug tab  (useful for bug reporting).
 
+## 🔌 Addon API (Favorites)
+
+LootHunter exposes a small public API for third-party addons:
+
+```lua
+-- boolean, string
+local isFav, label = LootHunterAPI:IsFavorite(itemID)
+```
+
+Behavior:
+
+*   Returns `true` if the item is in your Pending list (not Won and not equipped).
+*   `label` is a short tag for UI use (e.g., `|TInterface\\AddOns\\LootHunter\\Textures\\minimap_icon.tga:16|t LH`).
+
 ***
 
 ## 📝 Notes
 
-*   Optimized for the **MoP Classic and Retail** API.
+*   Optimized for the **MoP Classic** API.
 
 ## 🤝 Support & Community
 

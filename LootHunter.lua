@@ -14,6 +14,7 @@ local LogDebug = addonTable.LogDebug or function() end
 local GetCurrentSpecName
 local IsScopeAllowed
 local IsBonusRollWindowVisible
+local NormalizeTalentTabInfo
 local UpdateRaidChatFilter
 local MOPTierSelected = false
 local ShowDropAlert
@@ -23,12 +24,13 @@ local ScheduleHeroicQueueCheck
 local lastHeroicPrompt = 0
 local heroPopupShown = false
 local charKey = nil
-local StatsStore = {
+addonTable.StatsStore = {
     MAX_HISTORY_EVENTS = 200,
     MAX_SESSION_LOGS = 20,
     currentHistory = nil,
     currentSessionKey = nil,
 }
+local StatsStore = addonTable.StatsStore
 local function NowSeconds()
     if type(time) == "function" then
         return time()
@@ -41,6 +43,18 @@ end
 local function NormalizeUnitName(name)
     if not name or name == "" then return name end
     return name:match("^[^-]+") or name
+end
+addonTable.GetQualityFromLink = addonTable.GetQualityFromLink or function(link)
+    if type(link) ~= "string" or not _G.ITEM_QUALITY_COLORS then return nil end
+    local hex = link:match("|c(%x%x%x%x%x%x%x%x)")
+    if not hex then return nil end
+    hex = hex:lower()
+    for q, data in pairs(_G.ITEM_QUALITY_COLORS) do
+        if data and data.colorHex and data.colorHex:lower() == hex then
+            return q
+        end
+    end
+    return nil
 end
 local function SafeLeaveLFG()
     if LeaveLFG then
@@ -404,11 +418,26 @@ function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, ro
     if itemID then
         icon = select(10, GetItemInfo(itemID))
     end
+    local quality = nil
+    if itemID and C_Item and C_Item.GetItemQualityByID then
+        quality = C_Item.GetItemQualityByID(itemID)
+    end
+    if not quality and GetItemInfo then
+        if itemID then
+            quality = select(3, GetItemInfo(itemID))
+        elseif link then
+            quality = select(3, GetItemInfo(link))
+        end
+    end
+    if not quality and link then
+        quality = addonTable.GetQualityFromLink and addonTable.GetQualityFromLink(link) or nil
+    end
     local now = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
     local entry = {
         itemID = itemID,
         link = link,
         icon = icon,
+        quality = quality,
         player = playerName or UnitName("player"),
         class = classToken or self:ResolveClassToken(playerName),
         roll = rollValue,
@@ -1059,7 +1088,7 @@ local function HandleInfoUpdate(event, arg1)
     end)
 end
 -- Devuelve el nombre de la especializacion actual del jugador (si existe)
-local function NormalizeTalentTabInfo(tab, group)
+NormalizeTalentTabInfo = function(tab, group)
     if type(GetTalentTabInfo) ~= "function" then return nil, nil end
     local ok, v1, v2, v3, v4, v5 = pcall(GetTalentTabInfo, tab, nil, nil, group)
     if not ok then return nil, nil end
@@ -1875,6 +1904,12 @@ local function ScheduleCoinReminder(encounterID, bossName, forceRaid, forcePreWa
         end
         if not IsBonusRollWindowVisible() then
             LogCoinDebug(string.format("No-drop timer for %s fired but Bonus Roll window is not visible, skipping reminder.", entry.boss or "Unknown"))
+            if not entry.dropSeen and not entry.bossNoLootRecorded then
+                entry.bossNoLootRecorded = true
+                StatsStore:RecordHistoryEvent("boss_no_loot", { boss = entry.boss, player = UnitName("player") })
+                LogCoinDebug(string.format("Boss-no-loot stat recorded for %s (no drop seen, no bonus roll window).", entry.boss or "Unknown"))
+            end
+            PendingCoinReminders[key] = nil
             return
         end
         LogCoinDebug(string.format("No-drop timer (%.0fs) expired for %s. Triggering reminder.", reminderDelay, entry.boss or "Unknown"))
@@ -1941,6 +1976,13 @@ local function HandleEncounterEnd(event, encounterID, bossName, _, endStatus)
     end
 end
 -- Patrones de loot multi-idioma basados en GlobalStrings
+local function NormalizeLootFormat(fmt)
+    if type(fmt) ~= "string" then return fmt end
+    fmt = fmt:gsub("%%(%d+)%$s", "%%s")
+    fmt = fmt:gsub("%%(%d+)%$d", "%%d")
+    return fmt
+end
+
 local function BuildSelfLootPatterns()
     local patterns = {}
     local formats = {
@@ -1951,7 +1993,7 @@ local function BuildSelfLootPatterns()
         { fmt = LOOT_ITEM_BONUS_ROLL_SELF_MULTIPLE, bonus = true },
     }
     for _, entry in ipairs(formats) do
-        local fmt = entry.fmt
+        local fmt = NormalizeLootFormat(entry.fmt)
         if type(fmt) == "string" and fmt ~= "" then
             local pattern = "^" .. fmt:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
             table.insert(patterns, { pattern = pattern, isBonusRoll = entry.bonus })
@@ -1970,7 +2012,7 @@ local function BuildOtherLootPatterns()
         { fmt = LOOT_ITEM_BONUS_ROLL_OTHER_MULTIPLE, bonus = true },
     }
     for _, entry in ipairs(formats) do
-        local fmt = entry.fmt
+        local fmt = NormalizeLootFormat(entry.fmt)
         if type(fmt) == "string" and fmt ~= "" then
             local pattern = "^" .. fmt:gsub("%%s", "(.-)", 1):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
             table.insert(patterns, { pattern = pattern, isBonusRoll = entry.bonus })
@@ -1979,8 +2021,62 @@ local function BuildOtherLootPatterns()
     return patterns
 end
 
+local function BuildBonusRollMarkers()
+    local markers = {}
+    local formats = {
+        LOOT_ITEM_BONUS_ROLL_SELF,
+        LOOT_ITEM_BONUS_ROLL_SELF_MULTIPLE,
+        LOOT_ITEM_BONUS_ROLL_OTHER,
+        LOOT_ITEM_BONUS_ROLL_OTHER_MULTIPLE,
+    }
+    for _, fmt in ipairs(formats) do
+        fmt = NormalizeLootFormat(fmt)
+        if type(fmt) == "string" and fmt ~= "" then
+            local parts = {}
+            local i = 1
+            while true do
+                local s, e = fmt:find("%%[sd]", i)
+                if not s then
+                    table.insert(parts, fmt:sub(i))
+                    break
+                end
+                if s > i then
+                    table.insert(parts, fmt:sub(i, s - 1))
+                end
+                i = e + 1
+            end
+            local best = ""
+            for _, p in ipairs(parts) do
+                local cleaned = p:gsub("[%s%p]+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+                if #cleaned > #best then
+                    best = cleaned
+                end
+            end
+            if best ~= "" then
+                table.insert(markers, string.lower(best))
+            end
+        end
+    end
+    return markers
+end
+
 local selfLootPatterns = BuildSelfLootPatterns()
 local otherLootPatterns = BuildOtherLootPatterns()
+local bonusRollMarkers = BuildBonusRollMarkers()
+addonTable.RecentRolls = addonTable.RecentRolls or {}
+addonTable.ConsumeRecentRollForPlayer = addonTable.ConsumeRecentRollForPlayer or function(name)
+    if not name then return nil end
+    local norm = NormalizeUnitName(name)
+    local rec = addonTable.RecentRolls and addonTable.RecentRolls[norm]
+    if not rec or not rec.time then return nil end
+    local now = GetTime and GetTime() or 0
+    if (now - rec.time) > ROLL_TRACK_WINDOW then
+        addonTable.RecentRolls[norm] = nil
+        return nil
+    end
+    addonTable.RecentRolls[norm] = nil
+    return rec.value
+end
 local rollResultPattern = "^" .. (RANDOM_ROLL_RESULT or "%s rolls %d (%d-%d)"):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
 local rollFallbackPattern = "^(.-)%s+[Rr][Oo][Ll][Ll][Ss]%s+(%d+)%s+%((%d+)%-(%d+)%)"
 local function IsPlayerRollMessage(msg)
@@ -2102,16 +2198,25 @@ local function HandleChatSystem(event, msg, ...)
     local playerName = UnitName("player")
     local you = _G.YOU or "You"
     local youCaps = _G.YOU_CAPS
+    local normalized = NormalizeUnitName(name)
+    local now = GetTime()
     if not (name == playerName or name == you or (youCaps and name == youCaps)) then
+        addonTable.RecentRolls[normalized] = { value = tonumber(rollVal), time = now }
+        if LogDebug then
+            LogDebug(string.format("|cff00ff00[Roll]|r Other roll detected: player=%s value=%s", tostring(normalized), tostring(rollVal)))
+        end
         return
     end
     lastPlayerRollValue = tonumber(rollVal)
-    lastPlayerRollTime = GetTime()
+    lastPlayerRollTime = now
     if lastAnnouncedRollItemID and lastAnnouncedRollTime
         and (lastPlayerRollTime - lastAnnouncedRollTime) <= ROLL_TRACK_WINDOW then
         lastPlayerRollItemID = lastAnnouncedRollItemID
     else
         lastPlayerRollItemID = nil
+    end
+    if LogDebug then
+        LogDebug(string.format("|cff00ff00[Roll]|r Player roll detected: value=%s item=%s", tostring(rollVal), tostring(lastPlayerRollItemID)))
     end
 end
 local function HandleChatLoot(event, msg, ...)
@@ -2134,6 +2239,10 @@ local function HandleChatLoot(event, msg, ...)
         for _, pattern in ipairs(otherLootPatterns) do
             local capturedPlayer, capturedItemLink2 = msg:match(pattern.pattern)
             if capturedPlayer and capturedItemLink2 then
+                -- Si el orden viene invertido en el formato local, corrígelo usando el link del item.
+                if capturedPlayer:find("|Hitem:") and not capturedItemLink2:find("|Hitem:") then
+                    capturedPlayer, capturedItemLink2 = capturedItemLink2, capturedPlayer
+                end
                 playerName = capturedPlayer
                 itemLink = capturedItemLink2
                 isMine = (playerName == UnitName("player"))
@@ -2151,17 +2260,39 @@ local function HandleChatLoot(event, msg, ...)
             lootViaBonusRoll = true
         end
     end
+    if not lootViaBonusRoll and bonusRollMarkers and #bonusRollMarkers > 0 then
+        local msgLower = string.lower(msg)
+        for _, marker in ipairs(bonusRollMarkers) do
+            if marker ~= "" and msgLower:find(marker, 1, true) then
+                lootViaBonusRoll = true
+                break
+            end
+        end
+    end
     if LogDebug then
-        LogDebug(string.format("|cff00ff00[Alert]|r Loot chat detected: item=%s (id=%s) source=%s player=%s tracked=%s",
+        LogDebug(string.format("|cff00ff00[Alert]|r Loot chat detected: item=%s (id=%s) source=%s player=%s tracked=%s bonus=%s",
             tostring(itemLink),
             tostring(id),
             isMine and "self" or "other",
             tostring(playerName or UnitName("player") or "?"),
-            tostring(CurrentCharDB and CurrentCharDB[id] and true or false)))
+            tostring(CurrentCharDB and CurrentCharDB[id] and true or false),
+            tostring(lootViaBonusRoll)))
     end
     TriggerLootActivityTimerForItemID(id)
     -- Log de sesión para cualquier loot (tracked o no)
     local playerRollValue = isMine and GetRecentPlayerRollForItem(id) or nil
+    if not isMine and playerName then
+        playerRollValue = addonTable.ConsumeRecentRollForPlayer(playerName)
+    end
+    if not isMine and playerName and LogDebug then
+        if playerRollValue ~= nil then
+            LogDebug(string.format("|cff00ff00[Roll]|r Applied other roll to session: player=%s value=%s item=%s",
+                tostring(NormalizeUnitName(playerName)), tostring(playerRollValue), tostring(id)))
+        else
+            LogDebug(string.format("|cff00ff00[Roll]|r No roll applied for other player=%s (dice icon will be check if no bonus).",
+                tostring(NormalizeUnitName(playerName))))
+        end
+    end
     local skipSessionLog = tradeActive and isMine
     if not skipSessionLog then
         StatsStore:AddSessionLootEntry(id, itemLink, playerName or (isMine and UnitName("player")) or playerName, nil, playerRollValue, playerRollValue ~= nil, nil, lootViaBonusRoll)

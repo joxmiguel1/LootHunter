@@ -365,6 +365,16 @@ function addonTable.ShowPreWarningFrame(text, duration, enableShake, enableFade)
     end)
 end
 
+-- === SISTEMA DE FLASH (Alertas Visuales) ===
+local flashFrame = CreateFrame("Frame", "LootHunterFlash", UIParent)
+flashFrame:SetAllPoints()
+flashFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+flashFrame:Hide()
+
+local flashTex = flashFrame:CreateTexture(nil, "BACKGROUND")
+flashTex:SetAllPoints()
+flashTex:SetBlendMode("ADD") 
+
 function addonTable.ResetPreviewVisuals()
     if alertMsgFrame and alertMsgFrame.Clear then
         alertMsgFrame:Clear()
@@ -376,16 +386,6 @@ function addonTable.ResetPreviewVisuals()
         flashFrame:Hide()
     end
 end
-
--- === SISTEMA DE FLASH (Alertas Visuales) ===
-local flashFrame = CreateFrame("Frame", "LootHunterFlash", UIParent)
-flashFrame:SetAllPoints()
-flashFrame:SetFrameStrata("FULLSCREEN_DIALOG")
-flashFrame:Hide()
-
-local flashTex = flashFrame:CreateTexture(nil, "BACKGROUND")
-flashTex:SetAllPoints()
-flashTex:SetBlendMode("ADD") 
 
 function addonTable.FlashScreen(type)
     if StaticPopup1 and StaticPopup1:IsVisible() then return end
