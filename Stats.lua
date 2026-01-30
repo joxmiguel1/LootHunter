@@ -476,6 +476,7 @@ end
 local function BuildLootList(parent, items)
     local scroll = parent._lootScroll
     local child = parent._lootScrollChild
+    parent._lootLastItems = items
     local scrollOffset = scroll and scroll.GetVerticalScroll and scroll:GetVerticalScroll() or 0
     if scroll and child then
         for _, sub in ipairs({ child:GetChildren() }) do sub:Hide(); sub:SetParent(nil) end
@@ -515,20 +516,29 @@ local function BuildLootList(parent, items)
         return c.r or 1, c.g or 1, c.b or 1
     end
 
-    if C_Item and C_Item.RequestLoadItemDataByID and not parent._lootPrefetchScheduled then
-        local anyRequested = false
+    if C_Item and C_Item.RequestLoadItemDataByID then
+        local needsRefresh = false
         for _, info in ipairs(items) do
             local id = info and info.itemID
             if id then
-                C_Item.RequestLoadItemDataByID(id)
-                anyRequested = true
+                local cached = C_Item.IsItemDataCachedByID and C_Item.IsItemDataCachedByID(id)
+                if not cached and GetItemInfo then
+                    local name = GetItemInfo(id)
+                    cached = name ~= nil
+                end
+                if not cached then
+                    C_Item.RequestLoadItemDataByID(id)
+                    needsRefresh = true
+                end
             end
         end
-        if anyRequested and C_Timer and C_Timer.After then
+        if needsRefresh and not parent._lootPrefetchScheduled and C_Timer and C_Timer.After then
             parent._lootPrefetchScheduled = true
             C_Timer.After(0.2, function()
                 parent._lootPrefetchScheduled = false
-                BuildLootList(parent, items)
+                if parent._lootLastItems == items then
+                    BuildLootList(parent, items)
+                end
             end)
         end
     end
