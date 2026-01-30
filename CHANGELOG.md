@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 - Fixed boss-no-loot history counter when no bonus roll window is visible.
 - Session drops list now groups items by quality (Legendary/Epic/Rare/Uncommon) with section headers; added localization strings.
 - Bonus roll detection in loot chat is more robust (positional formats, inverted order, bonus markers); other players' roll values now show dice icon + roll number.
+- Cleanup: removed unused globals/locals and dead exports, including the old floating button helper.
 
 ## v1.1
 - Stats tab: Current List counters (tracked/pending/won/priority), History counters (drops/wins/losses/coin reminders/coins used/boss-no-loot/time since last win), session selector, and session drop list with loot source icons (direct drop, roll, bonus roll).

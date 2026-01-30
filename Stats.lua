@@ -474,19 +474,27 @@ local function BuildLeaderboard(parent, data)
 end
 
 local function BuildLootList(parent, items)
-    for _, child in ipairs({ parent:GetChildren() }) do child:Hide(); child:SetParent(nil) end
-    for _, region in ipairs({ parent:GetRegions() }) do region:Hide() end
-
-    local scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -4)
-    scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -8, 4)
-
-    local child = CreateFrame("Frame", nil, scroll)
-    child:SetSize(parent:GetWidth() or 320, 1)
-    scroll:SetScrollChild(child)
-    scroll:SetScript("OnSizeChanged", function(_, w)
-        child:SetWidth(w or (parent:GetWidth() or 320))
-    end)
+    local scroll = parent._lootScroll
+    local child = parent._lootScrollChild
+    local scrollOffset = scroll and scroll.GetVerticalScroll and scroll:GetVerticalScroll() or 0
+    if scroll and child then
+        for _, sub in ipairs({ child:GetChildren() }) do sub:Hide(); sub:SetParent(nil) end
+        for _, region in ipairs({ child:GetRegions() }) do region:Hide() end
+    else
+        for _, sub in ipairs({ parent:GetChildren() }) do sub:Hide(); sub:SetParent(nil) end
+        for _, region in ipairs({ parent:GetRegions() }) do region:Hide() end
+        scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -4)
+        scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -8, 4)
+        child = CreateFrame("Frame", nil, scroll)
+        child:SetSize(parent:GetWidth() or 320, 1)
+        scroll:SetScrollChild(child)
+        scroll:SetScript("OnSizeChanged", function(_, w)
+            child:SetWidth(w or (parent:GetWidth() or 320))
+        end)
+        parent._lootScroll = scroll
+        parent._lootScrollChild = child
+    end
 
     if not items or #items == 0 then
         local empty = child:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -495,6 +503,9 @@ local function BuildLootList(parent, items)
         empty:SetTextColor(0.25, 0.25, 0.25)
         SetAccentFont(empty, 11)
         child:SetHeight(30)
+        if scroll and scroll.SetVerticalScroll then
+            scroll:SetVerticalScroll(scrollOffset)
+        end
         return
     end
 
@@ -502,6 +513,24 @@ local function BuildLootList(parent, items)
     local function getClassColor(token)
         local c = classColors[token or ""] or {}
         return c.r or 1, c.g or 1, c.b or 1
+    end
+
+    if C_Item and C_Item.RequestLoadItemDataByID and not parent._lootPrefetchScheduled then
+        local anyRequested = false
+        for _, info in ipairs(items) do
+            local id = info and info.itemID
+            if id then
+                C_Item.RequestLoadItemDataByID(id)
+                anyRequested = true
+            end
+        end
+        if anyRequested and C_Timer and C_Timer.After then
+            parent._lootPrefetchScheduled = true
+            C_Timer.After(0.2, function()
+                parent._lootPrefetchScheduled = false
+                BuildLootList(parent, items)
+            end)
+        end
     end
 
     local function GetQualityFromEntry(info)
@@ -678,6 +707,9 @@ local function BuildLootList(parent, items)
     AddSection(uncommonLabel, #uncommonItems, uncommonItems, uncommonColor, false)
 
     child:SetHeight(math.abs(y) + 10)
+    if scroll and scroll.SetVerticalScroll then
+        scroll:SetVerticalScroll(scrollOffset)
+    end
 end
 local function BuildStatsPanel(frame)
     if not frame then return end

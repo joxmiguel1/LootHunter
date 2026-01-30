@@ -70,7 +70,6 @@ local function HeroicLog(msg)
     local t = GetTime and GetTime() or 0
     LogDebug(string.format("[HeroicQueue][%0.2f] %s", t, msg))
 end
-local lastRandomDungeonID = nil -- solo para logs
 local currentRandomDungeonID = nil -- selección actual del dropdown/random
 local currentRandomDungeonName = nil -- texto visible del dropdown
 local function RequestItemData(itemID)
@@ -755,7 +754,6 @@ local TriggerLootReadyTimers
 local COIN_REMINDER_DELAY = 4
 local COIN_REMINDER_MIN_WAIT = 30
 local COIN_REMINDER_MAX_WAIT = 150
-local COIN_REMINDER_FALLBACK = 40
 local PREWARN_SOUND_ID = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081
 local COIN_LOST_SOUND_ID = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081
 local OTHER_WON_SOUND = "Sound\\Creature\\ArthasPrisoner\\UR_ArthasPrisoner_YSVisThree01.ogg"
@@ -1024,7 +1022,6 @@ local function HandleAddonLoaded(event, arg1)
     if addonTable.CreateMinimapIcon then
         addonTable.CreateMinimapIcon()
     end
-    -- CreateFloatingButton() -- Reemplazado por el icono del minimapa
     BuildStaticDB()
     SetupHeroicQueueConfirm()
     UpdateRaidChatFilter()
@@ -1663,60 +1660,6 @@ local function StartCoinReminderTimer(key, reason, delay)
         ProcessCoinReminder(key)
     end)
 end
-local function StartTwoStageCoinReminder(key)
-    local entry = PendingCoinReminders[key]
-    if not entry or entry.timerStarted then return end
-    if entry.blockCoin then
-        LogCoinDebug(string.format("Two-stage reminder for %s blocked because coin is blocked.", entry.boss or "Unknown"))
-        return
-    end
-    local waitWindow = GetCoinReminderWait()
-    if entry.deathTime and (GetTime() - entry.deathTime) < waitWindow then
-        LogCoinDebug(string.format("Two-stage reminder for %s delayed until %.0fs after boss death.", entry.boss or "Unknown", waitWindow))
-        return
-    end
-    if entry.deferStartUntil and GetTime() < entry.deferStartUntil then
-        LogCoinDebug("Two-stage coin reminder deferred until boss pre-warning completes.")
-        return
-    end
-    entry.timerStarted = true
-    entry.isTwoStage = true -- Marca para permitir interrupción si cae loot
-    LogCoinDebug(string.format("Starting 2-stage timer for %s (wait %.0fs then 10s pre-warn + 35s final)", entry.boss or "Unknown", waitWindow))
-    if entry.skipPrewarn then
-        C_Timer.After(35, function()
-            if PendingCoinReminders[key] then
-                LogCoinDebug(string.format("2-stage timer finished for %s (skip pre-warn). Processing reminder.", entry.boss or "Unknown"))
-                ProcessCoinReminder(key)
-            end
-        end)
-        return
-    end
-    -- Fase 1: 10 segundos para aviso de texto
-    C_Timer.After(10, function()
-        local e = PendingCoinReminders[key]
-        if e then
-            if LootHunterDB.settings.coinReminder.preWarning then
-                local msg = string.format(L["COIN_PRE_WARNING"] or "|cff00ff00[Loot Hunter]|r %s might have your loot. Get your coin ready!", e.boss)
-                if addonTable.ShowPreWarningFrame then
-                    EnqueueAlert(6, ALERT_PRIORITY_PREWARN, function()
-                        addonTable.ShowPreWarningFrame(msg, 6)
-                        if PREWARN_SOUND_ID then PlaySound(PREWARN_SOUND_ID, "Master") end
-                    end)
-                else
-                    print(msg)
-                    if PREWARN_SOUND_ID then PlaySound(PREWARN_SOUND_ID, "Master") end
-                end
-            end
-            -- Fase 2: 35 segundos más para alerta completa
-            C_Timer.After(35, function()
-                if PendingCoinReminders[key] then
-                    LogCoinDebug(string.format("2-stage timer finished for %s. Processing reminder.", e.boss or "Unknown"))
-                    ProcessCoinReminder(key)
-                end
-            end)
-        end
-    end)
-end
 local function CancelCoinRemindersForBonusRoll(reason)
     if not PendingCoinReminders or not next(PendingCoinReminders) then return end
     for key, entry in pairs(PendingCoinReminders) do
@@ -2079,18 +2022,6 @@ addonTable.ConsumeRecentRollForPlayer = addonTable.ConsumeRecentRollForPlayer or
 end
 local rollResultPattern = "^" .. (RANDOM_ROLL_RESULT or "%s rolls %d (%d-%d)"):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
 local rollFallbackPattern = "^(.-)%s+[Rr][Oo][Ll][Ll][Ss]%s+(%d+)%s+%((%d+)%-(%d+)%)"
-local function IsPlayerRollMessage(msg)
-    if type(msg) ~= "string" then return false end
-    local name = msg:match(rollResultPattern)
-    if not name then return false end
-    local playerName = UnitName("player")
-    if name == playerName then return true end
-    local you = _G.YOU or "You"
-    if name == you then return true end
-    local youCaps = _G.YOU_CAPS
-    if youCaps and name == youCaps then return true end
-    return false
-end
 local function ShouldTriggerOtherWon(itemID)
     local now = GetTime and GetTime() or 0
     if suppressOtherWonUntil and now < suppressOtherWonUntil then
@@ -2419,7 +2350,7 @@ end
 
 local function HandleCombatLogEvent()
     if not CombatLogGetCurrentEventInfo then return end
-    local _, subEvent, _, _, sourceName, _, _, _, destName, destFlags = CombatLogGetCurrentEventInfo()
+    local _, subEvent, _, _, _, _, _, _, destName, destFlags = CombatLogGetCurrentEventInfo()
     if not subEvent then return end
     local function NormalizeSimple(name)
         if not name or name == "" then return nil end
@@ -3244,7 +3175,7 @@ function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
     if not id then return end
     id = tonumber(id)
     if not CurrentCharDB then return end 
-    local name, itemLinkResolved, quality = GetItemInfo(id)
+    local name, _, quality = GetItemInfo(id)
     local equipLoc = select(9, GetItemInfo(id))
     local icon = select(10, GetItemInfo(id))
     local instantEquipLoc, instantClassID, instantSubClassID = nil, nil, nil

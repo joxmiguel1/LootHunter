@@ -4,7 +4,6 @@ local CreateGradient = addonTable.CreateGradient or function(text) return text e
 
 -- Variables locales de UI -
 local mainFrame = nil
-local floatBtn = nil
 local panelList, panelHelp, panelConfig, panelLog, panelStats = nil, nil, nil, nil, nil
 local scrollChild = nil
 local listScrollFrame = nil
@@ -271,7 +270,6 @@ local function EnqueueAlert(duration, action, priority)
 end
 
 addonTable.EnqueueAlert = EnqueueAlert
-addonTable.GetAlertDefaultDuration = function() return ALERT_DEFAULT_DURATION end
 
 function addonTable.ShowAlert(text, r, g, b)
     if StaticPopup1 and StaticPopup1:IsVisible() then return end
@@ -473,30 +471,6 @@ local function IsDebugLoggingEnabled()
     return addonTable.IsDebugEnabled and addonTable.IsDebugEnabled()
 end
 
-function CreateFloatingButton()
-    if floatBtn then return end
-    floatBtn = CreateFrame("Button", "LootHunterFloatBtn", UIParent, "UIPanelButtonTemplate")
-    floatBtn:SetSize(80, 20)
-    floatBtn:SetText(L["BTN_TEXT"])
-    floatBtn:SetMovable(true)
-    floatBtn:EnableMouse(true)
-    floatBtn:RegisterForDrag("LeftButton")
-    floatBtn:SetScript("OnDragStart", floatBtn.StartMoving)
-    floatBtn:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, _, relPoint, x, y = self:GetPoint()
-        LootHunterDB.buttonPos = { point = point, relativePoint = relPoint, x = x, y = y }
-    end)
-    
-    local pos = LootHunterDB.buttonPos
-    floatBtn:SetPoint(pos.point, UIParent, pos.relativePoint or "CENTER", pos.x, pos.y)
-    floatBtn:SetScript("OnClick", function() LootHunter_CreateGUI() end)
-    if addonTable.ApplyUIScale then
-        addonTable.ApplyUIScale()
-    end
-    floatBtn:Show()
-end
-
 local function SaveWindowPosition()
     if not mainFrame then return end
     local point, _, relativePoint, x, y = mainFrame:GetPoint()
@@ -531,7 +505,6 @@ function addonTable.ApplyUIScale(scale)
     if mainFrame then mainFrame:SetScale(target) end
     if alertMsgFrame then alertMsgFrame:SetScale(target) end
     if preWarnFrame then preWarnFrame:SetScale(target) end
-    if floatBtn then floatBtn:SetScale(target) end
     if copyLogFrame then copyLogFrame:SetScale(target) end
 end
 
@@ -556,7 +529,7 @@ local function CreateHelpText(parent, text, relativeTo, yOff, isTitle)
     return fs
 end
 
-function CreateCopyLogWindow()
+local function CreateCopyLogWindow()
     local DebugLog = addonTable.DebugLog or {}
     if #DebugLog == 0 then
         print(L["LOG_EMPTY_ERROR"])
@@ -600,6 +573,7 @@ function CreateCopyLogWindow()
     copyLogFrame:Show()
     ApplyAccentFontRecursive(copyLogFrame)
 end
+addonTable.CreateCopyLogWindow = CreateCopyLogWindow
 
 function LootHunter_CreateGUI()
     if mainFrame then 
@@ -1418,12 +1392,6 @@ function LootHunter_CreateGUI()
         return btn
     end
 
-    local function PlayPeonQuote()
-        if PlaySoundFile then
-            PlaySoundFile("Sound\\Creature\\Peon\\PeonPissed1.ogg", "Master")
-        end
-    end
-
     local btnGuide = CreateSidebarBtn(L["SIDEBAR_GUIDE"], -10, viewGuide)
     do
         local pr, pg, pb = GetPrimaryColor()
@@ -1656,7 +1624,7 @@ function LootHunter_CreateGUI()
         local pr, pg, pb = GetPrimaryColor()
         discordLabel:SetTextColor(pr + (1 - pr) * 0.5, pg + (1 - pg) * 0.5, pb + (1 - pb) * 0.5)
     end
-    local discordBox = CreateCopyLinkBox(viewBugs, DISCORD_URL, discordLabel, -6)
+    CreateCopyLinkBox(viewBugs, DISCORD_URL, discordLabel, -6)
 
     viewBugs:HookScript("OnShow", function()
         if bugsLinkBox then
@@ -1894,7 +1862,7 @@ function LootHunter_CreateGUI()
     btnCopyLog:SetBackdropBorderColor(0, 0, 0, 1)
     btnCopyLog:SetNormalFontObject("GameFontHighlightSmall")
     btnCopyLog:SetText(L["BTN_EXPORT_LOG"])
-    btnCopyLog:SetScript("OnClick", CreateCopyLogWindow)
+    btnCopyLog:SetScript("OnClick", addonTable.CreateCopyLogWindow)
     btnCopyLog:SetShown(debugMode)
 
     local logScrollFrame = CreateFrame("ScrollFrame", nil, panelLog, "UIPanelScrollFrameTemplate")
@@ -1958,10 +1926,6 @@ function LootHunter_CreateGUI()
     local function BlendWithWhite(r, g, b, amount)
         local t = amount or 0.5
         return r + (1 - r) * t, g + (1 - g) * t, b + (1 - b) * t
-    end
-    local function BlendWithBlack(r, g, b, amount)
-        local t = amount or 0.5
-        return r * (1 - t), g * (1 - t), b * (1 - t)
     end
 
     local function SetTabState(tab, isActive)
@@ -2236,9 +2200,6 @@ function LootHunter_CreateGUI()
     versionLabel:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -10, 5)
     versionLabel:SetTextColor(0.35, 0.35, 0.35)
     versionLabel:SetText("v." .. tostring(GetAddonVersion()) .. "     ")
-    addonTable.SwitchToList = function()
-        if addonTable.SelectTab then addonTable.SelectTab(1) end
-    end
     LootHunter_RefreshUI()
     ApplyAccentFontRecursive(mainFrame)
 end

@@ -971,7 +971,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     Settings:CreateCheckbox(coinPanel, "coinReminder.enabled", L["SETTING_COIN_ENABLE_LABEL"], L["SETTING_COIN_ENABLE_DESC"])
     Settings:CreateCheckbox(coinPanel, "coinReminder.preWarning", L["SETTING_COIN_PREWARN_LABEL"], L["SETTING_COIN_PREWARN_DESC"], nil, PreviewCoinPreWarn)
     Settings:CreateCheckbox(coinPanel, "coinReminder.visualAlert", L["SETTING_COIN_VISUAL_LABEL"], L["SETTING_COIN_VISUAL_DESC"], nil, PreviewCoinVisual)
-    local _, _, lastCoinEntry = Settings:CreateCheckbox(coinPanel, "coinReminder.soundEnabled", L["SETTING_COIN_SOUND_LABEL"], L["SETTING_COIN_SOUND_DESC"], nil, PreviewCoinSound)
+    Settings:CreateCheckbox(coinPanel, "coinReminder.soundEnabled", L["SETTING_COIN_SOUND_LABEL"], L["SETTING_COIN_SOUND_DESC"], nil, PreviewCoinSound)
     Settings:CreateSlider(coinPanel, "coinReminder.reminderDelay", L["SETTING_COIN_DELAY_LABEL"], 30, 150, 5, L["SETTING_COIN_DELAY_DESC"])
 
 

@@ -1,4 +1,4 @@
-local addonName, addonTable = ...
+local _, addonTable = ...
 local L = addonTable.L
 
 local DebugLog = {}
@@ -31,8 +31,8 @@ local function ExportDebugLog()
         print(L["LOG_EMPTY_CONSOLE"])
         return
     end
-    if CreateCopyLogWindow then
-        CreateCopyLogWindow()
+    if addonTable.CreateCopyLogWindow then
+        addonTable.CreateCopyLogWindow()
     end
 end
 
