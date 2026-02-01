@@ -36,7 +36,7 @@ This addon eliminates human error from your raids:
 
  
 
-## 📊 Stats Tab
+## 📊 Stats Tab (new!!)
 
 Track your progress over time:
 
@@ -46,7 +46,6 @@ Track your progress over time:
 *   **Wall of Shame:** Quick summary of most deaths, most revives, and most time dead for the selected session.
 *   **Wall of Shame Command:** `/lh_wall` opens a dialog to choose Local, Guild, or Raid.
 
-
 ## 🎮 How to use it (It couldn't be easier)
 
 1.  Open the **Dungeon Journal** (`Shift+J`) or a gear vendor.
@@ -54,6 +53,7 @@ Track your progress over time:
 3.  **Shift+Click** the item.
 4.  **Done!** You can close everything now. Loot Hunter will watch that item for you forever.
 
+ 
 
 ## 🗺️ Minimap Button
 
@@ -65,11 +65,13 @@ Track your progress over time:
 *   `/loothunter` or `/lh`: Opens the main window.
 *   `/loothunter_debug`: Enable the debug tab  (useful for bug reporting).
 
+ 
+
 ## 🔌 Addon API (Favorites)
 
 LootHunter exposes a small public API for third-party addons:
 
-```lua
+```
 -- boolean, string
 local isFav, label = LootHunterAPI:IsFavorite(itemID)
 ```
@@ -78,6 +80,8 @@ Behavior:
 
 *   Returns `true` if the item is in your Pending list (not Won and not equipped).
 *   `label` is a short tag for UI use (e.g., `|TInterface\\AddOns\\LootHunter\\Textures\\minimap_icon.tga:16|t LH`).
+
+ 
 
 ***
 
@@ -91,4 +95,8 @@ Have an idea to improve the addon or found a bug? [**\[Join our Discord\]**](htt
 
 ***
 
-_Download Loot Hunter and secure your BiS today!_
+Something is not working? send me a message!
+
+[![Mi Status de Discord](https://discord.c99.nl/widget/theme-3/116688290459025411.png)](https://discord.com/users/116688290459025411)
+
+  _Download Loot Hunter and secure your BiS today!_
