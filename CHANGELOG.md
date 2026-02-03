@@ -1,5 +1,11 @@
 All notable changes to this project will be documented in this file.
 
+## v1.1.2
+- Boss-no-loot history counter now increments even when the coin reminder is disabled.
+- Stats: session loot history list shows full session drops again.
+- Heroic queue confirmation now also triggers from group/queue status updates (not just the join button).
+- Code sanitized: reduced temporary allocations in UI loops and replaced risky overrides with safer hooks.
+
 ## v1.1.1
 - Added public API `LootHunterAPI:IsFavorite(itemID)` for third-party favorites providers.(RoadBlock suggestion)
 - Documented the API in README (EN/ES).

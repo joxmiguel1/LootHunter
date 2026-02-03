@@ -10,11 +10,35 @@ local TEX_BONUS = "Interface\\Icons\\inv_misc_elvencoins"
 local TEX_SPEAKER = "Interface\\AddOns\\LootHunter\\Textures\\icon_alert.tga"
 local ENABLE_LEADERBOARD = false
 local selectedSessionKey = nil
+local lastSessionTopKey = nil
 local sessionMenuFrame, sessionMenuOverlay = nil, nil
 
+local function ForEachChild(frame, fn)
+    if not frame or not frame.GetChildren then return end
+    local n = select("#", frame:GetChildren())
+    for i = 1, n do
+        local child = select(i, frame:GetChildren())
+        if child then fn(child) end
+    end
+end
+
+local function ForEachRegion(frame, fn)
+    if not frame or not frame.GetRegions then return end
+    local n = select("#", frame:GetRegions())
+    for i = 1, n do
+        local region = select(i, frame:GetRegions())
+        if region then fn(region) end
+    end
+end
+
 local function ClearChildren(frame)
-    for _, child in ipairs({ frame:GetChildren() }) do child:Hide(); child:SetParent(nil) end
-    for _, region in ipairs({ frame:GetRegions() }) do region:Hide() end
+    ForEachChild(frame, function(child)
+        child:Hide()
+        child:SetParent(nil)
+    end)
+    ForEachRegion(frame, function(region)
+        region:Hide()
+    end)
 end
 
 local function GetPrimaryColor()
@@ -263,19 +287,18 @@ local function EnsureSessionSelection()
     local list = (addonTable.GetSessionList and addonTable.GetSessionList()) or {}
     if not list or #list == 0 then
         selectedSessionKey = nil
+        lastSessionTopKey = nil
         return list
     end
-    local currentKey = addonTable.GetCurrentSessionKey and addonTable.GetCurrentSessionKey()
+    local topKey = list[1] and list[1].key or nil
+    local newSession = topKey and topKey ~= lastSessionTopKey
+    lastSessionTopKey = topKey
+    if newSession then
+        selectedSessionKey = topKey
+        return list
+    end
     if not selectedSessionKey then
-        if currentKey then
-            for _, entry in ipairs(list) do
-                if entry.key == currentKey then
-                    selectedSessionKey = currentKey
-                    return list
-                end
-            end
-        end
-        selectedSessionKey = list[1].key
+        selectedSessionKey = topKey
         return list
     end
     local found = false
@@ -286,7 +309,7 @@ local function EnsureSessionSelection()
         end
     end
     if not found then
-        selectedSessionKey = list[1].key
+        selectedSessionKey = topKey
     end
     return list
 end
@@ -310,6 +333,7 @@ local function ShowSessionMenu(anchor, sessions, onSelect)
         sessionMenuFrame:SetBackdropBorderColor(0, 0, 0, 1)
         sessionMenuFrame:SetFrameStrata("TOOLTIP")
         sessionMenuFrame:SetClampedToScreen(true)
+        sessionMenuFrame:SetClipsChildren(true)
         sessionMenuFrame:SetScript("OnHide", function()
             if sessionMenuOverlay then sessionMenuOverlay:Hide() end
         end)
@@ -325,9 +349,13 @@ local function ShowSessionMenu(anchor, sessions, onSelect)
         sessionMenuOverlay:Hide()
     end
 
-    for _, child in ipairs({ sessionMenuFrame:GetChildren() }) do child:Hide(); child:SetParent(nil) end
+    ForEachChild(sessionMenuFrame, function(child)
+        child:Hide()
+        child:SetParent(nil)
+    end)
 
     local y = -4
+    local rowHeight = 20
     local width = math.max(180, anchor:GetWidth() or 0)
     if #sessions == 0 then
         local msg = sessionMenuFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -337,15 +365,22 @@ local function ShowSessionMenu(anchor, sessions, onSelect)
         msg:SetText(L["STATS_NO_SESSIONS"] or "No sessions yet")
         msg:SetTextColor(0.25, 0.25, 0.25)
         SetAccentFont(msg, 11)
-        y = y - 20
+        y = y - rowHeight
     else
         for _, entry in ipairs(sessions) do
             local btn = CreateFrame("Button", nil, sessionMenuFrame)
-            btn:SetSize(width - 8, 20)
+            btn:SetSize(width - 8, rowHeight)
             btn:SetPoint("TOPLEFT", 4, y)
             btn:SetNormalFontObject("GameFontHighlightSmall")
             btn:SetText(entry.label or entry.raidName or entry.key or "?")
-            SetAccentFont(btn:GetFontString(), 11)
+            local btnFS = btn:GetFontString()
+            if btnFS then
+                SetAccentFont(btnFS, 11)
+                btnFS:ClearAllPoints()
+                btnFS:SetPoint("LEFT", btn, "LEFT", 6, 0)
+                btnFS:SetPoint("RIGHT", btn, "RIGHT", -6, 0)
+                btnFS:SetJustifyH("LEFT")
+            end
             btn:SetScript("OnClick", function()
                 selectedSessionKey = entry.key
                 HideSessionMenu()
@@ -358,7 +393,7 @@ local function ShowSessionMenu(anchor, sessions, onSelect)
             btn:SetScript("OnLeave", function(self)
                 self:GetFontString():SetTextColor(1, 1, 1)
             end)
-            y = y - 20
+            y = y - rowHeight
         end
     end
 
@@ -442,8 +477,12 @@ local function BuildLeaderboard(parent, data)
         local col = columns[idx]
         if col and info and info.name and info.name ~= "" then
             col:Show()
-            for _, child in ipairs({ col:GetChildren() }) do child:Hide() end
-            for _, region in ipairs({ col:GetRegions() }) do region:Hide() end
+            ForEachChild(col, function(child)
+                child:Hide()
+            end)
+            ForEachRegion(col, function(region)
+                region:Hide()
+            end)
 
             local icon = col:CreateTexture(nil, "ARTWORK")
             local scale = info.scale or 1
@@ -479,11 +518,21 @@ local function BuildLootList(parent, items)
     parent._lootLastItems = items
     local scrollOffset = scroll and scroll.GetVerticalScroll and scroll:GetVerticalScroll() or 0
     if scroll and child then
-        for _, sub in ipairs({ child:GetChildren() }) do sub:Hide(); sub:SetParent(nil) end
-        for _, region in ipairs({ child:GetRegions() }) do region:Hide() end
+        ForEachChild(child, function(sub)
+            sub:Hide()
+            sub:SetParent(nil)
+        end)
+        ForEachRegion(child, function(region)
+            region:Hide()
+        end)
     else
-        for _, sub in ipairs({ parent:GetChildren() }) do sub:Hide(); sub:SetParent(nil) end
-        for _, region in ipairs({ parent:GetRegions() }) do region:Hide() end
+        ForEachChild(parent, function(sub)
+            sub:Hide()
+            sub:SetParent(nil)
+        end)
+        ForEachRegion(parent, function(region)
+            region:Hide()
+        end)
         scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
         scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -4)
         scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -8, 4)
@@ -701,6 +750,13 @@ local function BuildLootList(parent, items)
             uncommonItems[#uncommonItems + 1] = info
         end
     end
+    local function SortByNewest(a, b)
+        return (a and a.time or 0) > (b and b.time or 0)
+    end
+    table.sort(legendaryItems, SortByNewest)
+    table.sort(epicItems, SortByNewest)
+    table.sort(rareItems, SortByNewest)
+    table.sort(uncommonItems, SortByNewest)
 
     local legendLabel = L["STATS_LOOT_LEGENDARY"] or "Legendary"
     local epicLabel = L["STATS_LOOT_EPIC"] or "Epic"

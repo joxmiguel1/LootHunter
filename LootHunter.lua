@@ -1581,6 +1581,7 @@ end
 local function ProcessCoinReminder(key)
     local entry = PendingCoinReminders[key]
     if not entry or not CurrentCharDB then return end
+    local coinEnabled = entry.coinEnabled
     if entry.blockCoin then
         LogCoinDebug(string.format("Coin reminder for %s skipped because coin is blocked.", entry.boss or "Unknown"))
         return
@@ -1597,11 +1598,13 @@ local function ProcessCoinReminder(key)
         LogCoinDebug(string.format("Coin reminder for %s canceled: no items pending.", entry.boss or "Unknown"))
         return 
     end
-    StatsStore:RecordHistoryEvent("coin_reminder", { boss = entry.boss, player = UnitName("player") })
+    if coinEnabled then
+        StatsStore:RecordHistoryEvent("coin_reminder", { boss = entry.boss, player = UnitName("player") })
+    end
     if not entry.dropSeen then
         StatsStore:RecordHistoryEvent("boss_no_loot", { boss = entry.boss, player = UnitName("player") })
     end
-    if LootHunterDB.settings.coinReminder.visualAlert then
+    if coinEnabled and LootHunterDB.settings.coinReminder.visualAlert then
         local chatFmt = L["COIN_REMINDER_RAID_CHAT"] or L["COIN_REMINDER_RAID_MSG"]
         local chatMsg = string.format(chatFmt, entry.boss)
         if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
@@ -1629,10 +1632,12 @@ local function ProcessCoinReminder(key)
         LogAlertDebug("Coin reminder alert shown for " .. (entry.boss or "Unknown"))
     end
     -- Alertas visuales y sonoras
-    if LootHunterDB.settings.coinReminder.soundEnabled then
+    if coinEnabled and LootHunterDB.settings.coinReminder.soundEnabled then
         PlaySound(LootHunterDB.settings.coinReminder.soundFile or 12867) -- Sonido de alerta
     end
-    print(string.format(L["COIN_REMINDER_CHAT_MSG"], entry.boss))
+    if coinEnabled then
+        print(string.format(L["COIN_REMINDER_CHAT_MSG"], entry.boss))
+    end
     if addonTable.LogDebug then
         local names = {}
         for _, data in ipairs(stillMissing) do
@@ -1741,7 +1746,8 @@ function IsBonusRollWindowVisible()
     return frame and frame:IsShown()
 end
 local function ScheduleCoinReminder(encounterID, bossName, forceRaid, forcePreWarn)
-    if not CurrentCharDB or not bossName or bossName == "" or not (LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder.enabled) then return end
+    if not CurrentCharDB or not bossName or bossName == "" or not (LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder) then return end
+    local coinEnabled = LootHunterDB.settings.coinReminder.enabled
     local _, instanceType = IsInInstance()
     LastCoinReminderBoss = bossName
     local instanceName = (GetInstanceInfo and select(1, GetInstanceInfo())) or nil
@@ -1804,9 +1810,10 @@ local function ScheduleCoinReminder(encounterID, bossName, forceRaid, forcePreWa
         timerStarted = false,
         dropSeen = false,
         blockCoin = false,
+        coinEnabled = coinEnabled,
         deathTime = GetTime(),
     }
-    if LootHunterDB.settings.coinReminder.preWarning then
+    if coinEnabled and LootHunterDB.settings.coinReminder.preWarning then
         C_Timer.After(3, function()
             local entry = PendingCoinReminders[key]
             if not entry then return end
@@ -1843,6 +1850,15 @@ local function ScheduleCoinReminder(encounterID, bossName, forceRaid, forcePreWa
         if not entry then return end
         if entry.blockCoin then
             LogCoinDebug(string.format("No-drop timer skipped for %s because coin is blocked.", entry.boss or "Unknown"))
+            return
+        end
+        if not entry.coinEnabled then
+            if not entry.dropSeen and not entry.bossNoLootRecorded then
+                entry.bossNoLootRecorded = true
+                StatsStore:RecordHistoryEvent("boss_no_loot", { boss = entry.boss, player = UnitName("player") })
+                LogCoinDebug(string.format("Boss-no-loot stat recorded for %s (coin reminder disabled).", entry.boss or "Unknown"))
+            end
+            PendingCoinReminders[key] = nil
             return
         end
         if not IsBonusRollWindowVisible() then
@@ -2061,16 +2077,14 @@ local function HandleInstanceChange(event)
     end
     local inInstance, instanceType = IsInInstance()
     local nowInRaid = inInstance and instanceType == "raid"
-    local stillInRaidGroup = IsInRaid and IsInRaid() or false
-    if lastInRaid and not nowInRaid and not stillInRaidGroup then
+    if lastInRaid and not nowInRaid then
         if not pendingRaidExitCheck and C_Timer and C_Timer.After then
             pendingRaidExitCheck = true
-            C_Timer.After(6, function()
+            C_Timer.After(20, function()
                 pendingRaidExitCheck = false
                 local inInst2, instType2 = IsInInstance()
                 local nowInRaid2 = inInst2 and instType2 == "raid"
-                local stillInRaidGroup2 = IsInRaid and IsInRaid() or false
-                if (not nowInRaid2) and (not stillInRaidGroup2) then
+                if not nowInRaid2 then
                     if StatsStore then
                         StatsStore.currentSessionKey = nil
                         StatsStore.forceNewSession = true
@@ -2644,11 +2658,10 @@ end
 local function HookMerchantHighlight()
     if merchantHooked or not MerchantFrame_UpdateMerchantInfo then return end
     merchantHooked = true
-    local originalMerchantUpdate = MerchantFrame_UpdateMerchantInfo
-    MerchantFrame_UpdateMerchantInfo = function(...)
-        local res = originalMerchantUpdate(...)
-        HighlightTrackedMerchantItems()
-        return res
+    if hooksecurefunc then
+        hooksecurefunc("MerchantFrame_UpdateMerchantInfo", function()
+            HighlightTrackedMerchantItems()
+        end)
     end
     if not merchantTooltipHooked and hooksecurefunc and GameTooltip then
         merchantTooltipHooked = true
@@ -2853,13 +2866,16 @@ SetupHeroicQueueConfirm = function()
     end
     HookLFDTypeDropdownButtons()
 
-    local originalJoin = LFDQueueFrame_Join
-    LFDQueueFrame_Join = function(...)
-        HeroicLog("LFDQueueFrame_Join invoked")
-        local args = { ... }
-        originalJoin(unpackCompat and unpackCompat(args) or args[1])
-        ScheduleHeroicQueueCheck()
+    if hooksecurefunc then
+        hooksecurefunc("LFDQueueFrame_Join", function()
+            HeroicLog("LFDQueueFrame_Join invoked")
+            ScheduleHeroicQueueCheck()
+        end)
     end
+end
+
+local function HandleLFGQueueUpdate()
+    ScheduleHeroicQueueCheck()
 end
 
 local eventHandlers = {
@@ -2893,6 +2909,9 @@ local eventHandlers = {
     MERCHANT_UPDATE = HandleMerchantEvent,
     PLAYER_ENTERING_WORLD = HandleInstanceChange,
     ZONE_CHANGED_NEW_AREA = HandleInstanceChange,
+    LFG_QUEUE_STATUS_UPDATE = HandleLFGQueueUpdate,
+    LFG_UPDATE = HandleLFGQueueUpdate,
+    LFG_PROPOSAL_SHOW = HandleLFGQueueUpdate,
 }
 frame:SetScript("OnEvent", function(self, event, arg1, ...)
     if eventHandlers[event] then
@@ -2929,6 +2948,9 @@ frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 frame:RegisterEvent("TRADE_SHOW")
 frame:RegisterEvent("TRADE_CLOSED")
+frame:RegisterEvent("LFG_QUEUE_STATUS_UPDATE")
+frame:RegisterEvent("LFG_UPDATE")
+frame:RegisterEvent("LFG_PROPOSAL_SHOW")
 -- === CACHE DE LOOT (EJ) ===
 local LootSourceCache = {}
 local StaticDBBuilt = false

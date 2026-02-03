@@ -25,6 +25,24 @@ local DEFAULT_WINDOW_HEIGHT = 456
 addonTable.DEFAULT_WINDOW_WIDTH = DEFAULT_WINDOW_WIDTH
 addonTable.DEFAULT_WINDOW_HEIGHT = DEFAULT_WINDOW_HEIGHT
 
+local function ForEachChild(frame, fn)
+    if not frame or not frame.GetChildren then return end
+    local n = select("#", frame:GetChildren())
+    for i = 1, n do
+        local child = select(i, frame:GetChildren())
+        if child then fn(child) end
+    end
+end
+
+local function ForEachRegion(frame, fn)
+    if not frame or not frame.GetRegions then return end
+    local n = select("#", frame:GetRegions())
+    for i = 1, n do
+        local region = select(i, frame:GetRegions())
+        if region then fn(region) end
+    end
+end
+
 local function ElevateDropdown(frame, anchor)
     if not frame then return end
     frame:SetFrameStrata("TOOLTIP")
@@ -72,16 +90,15 @@ end
 -- Fuerza nuestra fuente en todas las FontStrings de un frame (recursivo)
 local function ApplyAccentFontRecursive(frame)
     if not frame or type(frame) ~= "table" then return end
-    local regions = { frame:GetRegions() }
-    for _, region in ipairs(regions) do
+    ForEachRegion(frame, function(region)
         if region and region.GetObjectType and region:GetObjectType() == "FontString" then
             local _, size, flags = region:GetFont()
             region:SetFont(ACCENT_FONT, size or 12, flags)
         end
-    end
-    for _, child in ipairs({ frame:GetChildren() }) do
+    end)
+    ForEachChild(frame, function(child)
         ApplyAccentFontRecursive(child)
-    end
+    end)
 end
 
 local function CloseAllDropdowns()
@@ -134,7 +151,10 @@ local function ShowRowSpecMenu(anchor, entry)
         end)
     end
     -- Limpiar botones previos
-    for _, child in ipairs({ specRowMenuFrame:GetChildren() }) do child:Hide(); child:SetParent(nil) end
+    ForEachChild(specRowMenuFrame, function(child)
+        child:Hide()
+        child:SetParent(nil)
+    end)
 
     local yPos = -5
     local function CreateOption(text, specID)
@@ -827,8 +847,10 @@ function LootHunter_CreateGUI()
     btnTypeFilter:SetScript("OnClick", function(self)
         CloseAllDropdowns()
         if typeMenuFrame:IsShown() then typeMenuFrame:Hide() return end
-        local kids = { typeMenuFrame:GetChildren() }
-        for _, child in ipairs(kids) do child:Hide(); child:SetParent(nil) end
+        ForEachChild(typeMenuFrame, function(child)
+            child:Hide()
+            child:SetParent(nil)
+        end)
         local yPos = -5
         CreateTypeMenuButton(typeMenuFrame, L["FILTER_ALL"], "ALL", yPos)
         yPos = yPos - 20
@@ -913,8 +935,10 @@ function LootHunter_CreateGUI()
     btnSourceFilter:SetScript("OnClick", function(self)
         CloseAllDropdowns()
         if sourceMenuFrame:IsShown() then sourceMenuFrame:Hide() return end
-        local kids = { sourceMenuFrame:GetChildren() }
-        for _, child in ipairs(kids) do child:Hide(); child:SetParent(nil) end
+        ForEachChild(sourceMenuFrame, function(child)
+            child:Hide()
+            child:SetParent(nil)
+        end)
         local yPos = -5
         CreateSourceMenuButton(sourceMenuFrame, L["FILTER_ALL"], "ALL", yPos)
         yPos = yPos - 20
@@ -1002,8 +1026,10 @@ function LootHunter_CreateGUI()
     btnSpecFilter:SetScript("OnClick", function(self)
         CloseAllDropdowns()
         if specMenuFrame:IsShown() then specMenuFrame:Hide() return end
-        local kids = { specMenuFrame:GetChildren() }
-        for _, child in ipairs(kids) do child:Hide(); child:SetParent(nil) end
+        ForEachChild(specMenuFrame, function(child)
+            child:Hide()
+            child:SetParent(nil)
+        end)
         local yPos = -5
         CreateSpecMenuButton(specMenuFrame, L["FILTER_ALL"], "ALL", yPos)
         yPos = yPos - 20
@@ -2226,10 +2252,13 @@ function LootHunter_RefreshUI()
         return 
     end
 
-    local kids = { scrollChild:GetChildren() }
-    for _, child in ipairs(kids) do child:Hide(); child:SetParent(nil) end
-    local regions = { scrollChild:GetRegions() }
-    for _, region in ipairs(regions) do region:Hide() end
+    ForEachChild(scrollChild, function(child)
+        child:Hide()
+        child:SetParent(nil)
+    end)
+    ForEachRegion(scrollChild, function(region)
+        region:Hide()
+    end)
 
     local SLOT_INFO = addonTable.SLOT_INFO or {}
     local sortedList = {}
