@@ -10,7 +10,6 @@ local TEX_BONUS = "Interface\\Icons\\inv_misc_elvencoins"
 local TEX_SPEAKER = "Interface\\AddOns\\LootHunter\\Textures\\icon_alert.tga"
 local ENABLE_LEADERBOARD = false
 local selectedSessionKey = nil
-local lastSessionTopKey = nil
 local sessionMenuFrame, sessionMenuOverlay = nil, nil
 
 local function ForEachChild(frame, fn)
@@ -19,6 +18,15 @@ local function ForEachChild(frame, fn)
     for i = 1, n do
         local child = select(i, frame:GetChildren())
         if child then fn(child) end
+    end
+end
+
+local function DrainChildren(frame, fn)
+    if not frame or not frame.GetChildren then return end
+    local child = frame:GetChildren()
+    while child do
+        fn(child)
+        child = frame:GetChildren()
     end
 end
 
@@ -32,7 +40,7 @@ local function ForEachRegion(frame, fn)
 end
 
 local function ClearChildren(frame)
-    ForEachChild(frame, function(child)
+    DrainChildren(frame, function(child)
         child:Hide()
         child:SetParent(nil)
     end)
@@ -287,18 +295,10 @@ local function EnsureSessionSelection()
     local list = (addonTable.GetSessionList and addonTable.GetSessionList()) or {}
     if not list or #list == 0 then
         selectedSessionKey = nil
-        lastSessionTopKey = nil
-        return list
-    end
-    local topKey = list[1] and list[1].key or nil
-    local newSession = topKey and topKey ~= lastSessionTopKey
-    lastSessionTopKey = topKey
-    if newSession then
-        selectedSessionKey = topKey
         return list
     end
     if not selectedSessionKey then
-        selectedSessionKey = topKey
+        selectedSessionKey = list[1].key
         return list
     end
     local found = false
@@ -309,7 +309,7 @@ local function EnsureSessionSelection()
         end
     end
     if not found then
-        selectedSessionKey = topKey
+        selectedSessionKey = list[1].key
     end
     return list
 end
@@ -340,7 +340,8 @@ local function ShowSessionMenu(anchor, sessions, onSelect)
     end
     if not sessionMenuOverlay then
         sessionMenuOverlay = CreateFrame("Button", nil, UIParent)
-        sessionMenuOverlay:SetFrameStrata("TOOLTIP")
+        sessionMenuOverlay:SetFrameStrata("LOW")
+        sessionMenuOverlay:SetFrameLevel(1)
         sessionMenuOverlay:EnableMouse(true)
         sessionMenuOverlay:SetAllPoints(UIParent)
         sessionMenuOverlay:SetScript("OnClick", function()
@@ -349,7 +350,7 @@ local function ShowSessionMenu(anchor, sessions, onSelect)
         sessionMenuOverlay:Hide()
     end
 
-    ForEachChild(sessionMenuFrame, function(child)
+    DrainChildren(sessionMenuFrame, function(child)
         child:Hide()
         child:SetParent(nil)
     end)
@@ -368,11 +369,16 @@ local function ShowSessionMenu(anchor, sessions, onSelect)
         y = y - rowHeight
     else
         for _, entry in ipairs(sessions) do
+            local entryData = entry
+            local entryKey = entryData and entryData.key or nil
+            local entryLabel = entryData and (entryData.label or entryData.raidName or entryData.key) or "?"
             local btn = CreateFrame("Button", nil, sessionMenuFrame)
             btn:SetSize(width - 8, rowHeight)
             btn:SetPoint("TOPLEFT", 4, y)
             btn:SetNormalFontObject("GameFontHighlightSmall")
-            btn:SetText(entry.label or entry.raidName or entry.key or "?")
+            btn:SetText(entryLabel or "?")
+            btn:SetFrameStrata("TOOLTIP")
+            btn:SetFrameLevel((sessionMenuFrame:GetFrameLevel() or 1) + 1)
             local btnFS = btn:GetFontString()
             if btnFS then
                 SetAccentFont(btnFS, 11)
@@ -382,9 +388,9 @@ local function ShowSessionMenu(anchor, sessions, onSelect)
                 btnFS:SetJustifyH("LEFT")
             end
             btn:SetScript("OnClick", function()
-                selectedSessionKey = entry.key
+                selectedSessionKey = entryKey
                 HideSessionMenu()
-                if onSelect then onSelect(entry) end
+                if onSelect then onSelect(entryData) end
             end)
             btn:SetScript("OnEnter", function(self)
                 local pr, pg, pb = GetPrimaryColor()
@@ -518,7 +524,7 @@ local function BuildLootList(parent, items)
     parent._lootLastItems = items
     local scrollOffset = scroll and scroll.GetVerticalScroll and scroll:GetVerticalScroll() or 0
     if scroll and child then
-        ForEachChild(child, function(sub)
+        DrainChildren(child, function(sub)
             sub:Hide()
             sub:SetParent(nil)
         end)
@@ -526,7 +532,7 @@ local function BuildLootList(parent, items)
             region:Hide()
         end)
     else
-        ForEachChild(parent, function(sub)
+        DrainChildren(parent, function(sub)
             sub:Hide()
             sub:SetParent(nil)
         end)
@@ -554,7 +560,7 @@ local function BuildLootList(parent, items)
         SetAccentFont(empty, 11)
         child:SetHeight(30)
         if scroll and scroll.SetVerticalScroll then
-            scroll:SetVerticalScroll(scrollOffset)
+            scroll:SetVerticalScroll(0)
         end
         return
     end

@@ -34,6 +34,15 @@ local function ForEachChild(frame, fn)
     end
 end
 
+local function DrainChildren(frame, fn)
+    if not frame or not frame.GetChildren then return end
+    local child = frame:GetChildren()
+    while child do
+        fn(child)
+        child = frame:GetChildren()
+    end
+end
+
 local function ForEachRegion(frame, fn)
     if not frame or not frame.GetRegions then return end
     local n = select("#", frame:GetRegions())
@@ -151,7 +160,7 @@ local function ShowRowSpecMenu(anchor, entry)
         end)
     end
     -- Limpiar botones previos
-    ForEachChild(specRowMenuFrame, function(child)
+    DrainChildren(specRowMenuFrame, function(child)
         child:Hide()
         child:SetParent(nil)
     end)
@@ -847,7 +856,7 @@ function LootHunter_CreateGUI()
     btnTypeFilter:SetScript("OnClick", function(self)
         CloseAllDropdowns()
         if typeMenuFrame:IsShown() then typeMenuFrame:Hide() return end
-        ForEachChild(typeMenuFrame, function(child)
+        DrainChildren(typeMenuFrame, function(child)
             child:Hide()
             child:SetParent(nil)
         end)
@@ -935,7 +944,7 @@ function LootHunter_CreateGUI()
     btnSourceFilter:SetScript("OnClick", function(self)
         CloseAllDropdowns()
         if sourceMenuFrame:IsShown() then sourceMenuFrame:Hide() return end
-        ForEachChild(sourceMenuFrame, function(child)
+        DrainChildren(sourceMenuFrame, function(child)
             child:Hide()
             child:SetParent(nil)
         end)
@@ -1026,7 +1035,7 @@ function LootHunter_CreateGUI()
     btnSpecFilter:SetScript("OnClick", function(self)
         CloseAllDropdowns()
         if specMenuFrame:IsShown() then specMenuFrame:Hide() return end
-        ForEachChild(specMenuFrame, function(child)
+        DrainChildren(specMenuFrame, function(child)
             child:Hide()
             child:SetParent(nil)
         end)
@@ -2252,7 +2261,7 @@ function LootHunter_RefreshUI()
         return 
     end
 
-    ForEachChild(scrollChild, function(child)
+    DrainChildren(scrollChild, function(child)
         child:Hide()
         child:SetParent(nil)
     end)

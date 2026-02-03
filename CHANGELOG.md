@@ -1,5 +1,11 @@
 All notable changes to this project will be documented in this file.
 
+## v1.1.3
+- Stats: multiple fixes; the session list now updates reliably again.
+- Settings (Stats): max sessions range is now 25-50 (default 25).
+- API: added compatibility for BonusRollPreview favorites tag.
+- Loot list: newest items now appear at the top within each quality group.
+
 ## v1.1.2
 - Boss-no-loot history counter now increments even when the coin reminder is disabled.
 - Stats: session loot history list shows full session drops again.

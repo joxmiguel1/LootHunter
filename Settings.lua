@@ -711,7 +711,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         if addonTable.db and addonTable.db.settings[db_category] and addonTable.db.settings[db_category][db_key] ~= nil then
             current = addonTable.db.settings[db_category][db_key]
         elseif db_category == "stats" and db_key == "maxSessions" then
-            current = 20
+            current = 25
         end
         current = tonumber(current) or current or (maxValue or 0)
         local minV = minValue or 0
@@ -1044,7 +1044,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         statsPanel,
         "stats.maxSessions",
         L["SETTING_STATS_MAX_SESSIONS"],
-        1,
+        25,
         50,
         1,
         L["SETTING_STATS_MAX_SESSIONS_DESC"],

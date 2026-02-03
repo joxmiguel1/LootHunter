@@ -26,7 +26,7 @@ local heroPopupShown = false
 local charKey = nil
 addonTable.StatsStore = {
     MAX_HISTORY_EVENTS = 200,
-    MAX_SESSION_LOGS = 20,
+    MAX_SESSION_LOGS = 25,
     currentHistory = nil,
     currentSessionKey = nil,
 }
@@ -890,7 +890,7 @@ local function InitializeSettings()
     end
     if LootHunterDB.settings and LootHunterDB.settings.stats and LootHunterDB.settings.stats.maxSessions then
         local maxSessions = tonumber(LootHunterDB.settings.stats.maxSessions) or 25
-        maxSessions = math.max(1, math.min(50, maxSessions))
+        maxSessions = math.max(25, math.min(50, maxSessions))
         StatsStore.MAX_SESSION_LOGS = maxSessions
     end
 end
