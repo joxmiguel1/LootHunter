@@ -299,10 +299,12 @@ function StatsStore:GetMostRecentSession(raidName, instanceID)
     if not db then return nil end
     local best = nil
     for _, session in pairs(db.sessions) do
-        if session.raidName == raidName then
-            if not instanceID or not session.instanceID or session.instanceID == instanceID then
-                if not best or (session.startedAt or 0) > (best.startedAt or 0) then
-                    best = session
+        if session and not session.closedAt then
+            if session.raidName == raidName then
+                if not instanceID or not session.instanceID or session.instanceID == instanceID then
+                    if not best or (session.startedAt or 0) > (best.startedAt or 0) then
+                        best = session
+                    end
                 end
             end
         end
@@ -348,6 +350,18 @@ function StatsStore:EnsureCurrentSession()
     if not raidName then return nil end
     local db = self:EnsureSessionDB()
     if not db then return nil end
+    if self.currentSessionKey and db.sessions[self.currentSessionKey] then
+        local sess = db.sessions[self.currentSessionKey]
+        if sess.closedAt then
+            self.currentSessionKey = nil
+        elseif sess.raidName == raidName and (not sess.instanceID or not instanceID or sess.instanceID == instanceID) then
+            sess.deaths = sess.deaths or {}
+            sess.revives = sess.revives or {}
+            sess.deadTime = sess.deadTime or {}
+            sess.deathStart = sess.deathStart or {}
+            return self.currentSessionKey, sess
+        end
+    end
     if self.currentSessionKey and db.sessions[self.currentSessionKey] then
         local sess = db.sessions[self.currentSessionKey]
         if sess.raidName == raidName and (not sess.instanceID or not instanceID or sess.instanceID == instanceID) then
@@ -531,6 +545,17 @@ function StatsStore:AddRevive(name)
     session.revives = session.revives or {}
     session.revives[name] = (session.revives[name] or 0) + 1
     self:EndDeathTimer(name)
+end
+
+function StatsStore:CloseCurrentSession(reason)
+    if not self.currentSessionKey then return end
+    local db = self:EnsureSessionDB()
+    if not db or not db.sessions then return end
+    local session = db.sessions[self.currentSessionKey]
+    if not session then return end
+    session.closedAt = NowSeconds()
+    session.closedReason = reason or "left_instance"
+    self.currentSessionKey = nil
 end
 
 function StatsStore:EndDeathTimer(name)
@@ -2077,16 +2102,18 @@ local function HandleInstanceChange(event)
     end
     local inInstance, instanceType = IsInInstance()
     local nowInRaid = inInstance and instanceType == "raid"
-    if lastInRaid and not nowInRaid then
+    local stillInRaidGroup = IsInRaid and IsInRaid() or false
+    if lastInRaid and (not nowInRaid or not stillInRaidGroup) then
         if not pendingRaidExitCheck and C_Timer and C_Timer.After then
             pendingRaidExitCheck = true
             C_Timer.After(20, function()
                 pendingRaidExitCheck = false
                 local inInst2, instType2 = IsInInstance()
                 local nowInRaid2 = inInst2 and instType2 == "raid"
-                if not nowInRaid2 then
+                local stillInRaidGroup2 = IsInRaid and IsInRaid() or false
+                if (not nowInRaid2) or (not stillInRaidGroup2) then
                     if StatsStore then
-                        StatsStore.currentSessionKey = nil
+                        StatsStore:CloseCurrentSession("left_instance_or_group")
                         StatsStore.forceNewSession = true
                     end
                 end
@@ -2426,15 +2453,42 @@ local function IsTrackableUnit(unit)
     return false
 end
 
-local function HandleUnitLifeState(event, unit)
-    if not IsTrackableUnit(unit) then return end
-    if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then return end
-    local name = UnitName(unit)
-    if not name or name == "" then return end
-    name = NormalizeUnitName(name)
-    if StatsStore and StatsStore.EndDeathTimer then
+local function SweepDeathTimers()
+    if not StatsStore or not StatsStore.EndDeathTimer then return end
+    local function maybeEnd(unit)
+        if not unit then return end
+        if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then return end
+        local name = UnitName(unit)
+        if not name or name == "" then return end
+        name = NormalizeUnitName(name)
         StatsStore:EndDeathTimer(name)
     end
+    maybeEnd("player")
+    if IsInRaid and IsInRaid() then
+        local n = GetNumGroupMembers and GetNumGroupMembers() or 0
+        for i = 1, n do
+            maybeEnd("raid" .. i)
+        end
+    elseif IsInGroup and IsInGroup() then
+        local n = GetNumSubgroupMembers and GetNumSubgroupMembers() or 0
+        for i = 1, n do
+            maybeEnd("party" .. i)
+        end
+    end
+end
+
+local function HandleUnitLifeState(event, unit)
+    if IsTrackableUnit(unit) then
+        if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then return end
+        local name = UnitName(unit)
+        if not name or name == "" then return end
+        name = NormalizeUnitName(name)
+        if StatsStore and StatsStore.EndDeathTimer then
+            StatsStore:EndDeathTimer(name)
+        end
+        return
+    end
+    SweepDeathTimers()
 end
 local function PlayOtherWonSound(force)
     if not force and not (LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts.otherWonSound) then return end
@@ -2905,6 +2959,7 @@ local eventHandlers = {
     PLAYER_SPECIALIZATION_CHANGED = HandleSpecChange,
     ACTIVE_TALENT_GROUP_CHANGED = HandleSpecChange,
     PLAYER_TALENT_UPDATE = HandleSpecChange,
+    GROUP_ROSTER_UPDATE = HandleInstanceChange,
     MERCHANT_SHOW = HandleMerchantEvent,
     MERCHANT_UPDATE = HandleMerchantEvent,
     PLAYER_ENTERING_WORLD = HandleInstanceChange,
@@ -2942,6 +2997,7 @@ frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 frame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 frame:RegisterEvent("PLAYER_TALENT_UPDATE")
+frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 frame:RegisterEvent("MERCHANT_SHOW")
 frame:RegisterEvent("MERCHANT_UPDATE")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")

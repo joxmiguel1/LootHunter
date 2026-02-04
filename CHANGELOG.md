@@ -1,5 +1,9 @@
 All notable changes to this project will be documented in this file.
 
+## v1.1.4
+- Session tracking: close the active raid session after a disband while inside the instance.
+- Session tracking: fixed new raid instances not being recorded.
+
 ## v1.1.3
 - Stats: multiple fixes; the session list now updates reliably again.
 - Settings (Stats): max sessions range is now 25-50 (default 25).
