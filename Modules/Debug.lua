@@ -2,6 +2,14 @@ local _, addonTable = ...
 local L = addonTable.L
 
 local DebugLog = {}
+local DEBUG_LOG_MAX = 1000
+
+local function PushDebugLog(msg)
+    if #DebugLog >= DEBUG_LOG_MAX then
+        table.remove(DebugLog, 1)
+    end
+    table.insert(DebugLog, msg)
+end
 
 local function IsDebugEnabled()
     return LootHunterDB
@@ -13,7 +21,7 @@ addonTable.IsDebugEnabled = IsDebugEnabled
 
 local function LogDebug(msg)
     if not IsDebugEnabled() then return end
-    table.insert(DebugLog, msg)
+    PushDebugLog(msg)
     print(msg)
 end
 addonTable.DebugLog = DebugLog

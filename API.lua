@@ -67,7 +67,7 @@ local function IsBankOpen()
     return (BankFrame and BankFrame:IsShown()) or (BankFrame and BankFrame:IsVisible())
 end
 
--- Returns: boolean isFavorite, string shortLabel
+-- Devuelve: boolean isFavorite, string shortLabel
 function api:IsFavorite(itemID)
     if not itemID then return false end
 
@@ -80,39 +80,41 @@ function api:IsFavorite(itemID)
     local data = db[id]
     if not data then return false end
 
+    local fromPreview = CalledFromBonusRollPreview()
+
     local status = data.status or 0
     if status == 2 then
-        if CalledFromBonusRollPreview() then return "", false end
-        return false
+        if fromPreview then return false, "" end
+        return false, ""
     end
 
     if IsEquippedItem and IsEquippedItem(id) then
-        if CalledFromBonusRollPreview() then return "", false end
-        return false
+        if fromPreview then return false, "" end
+        return false, ""
     end
 
     local countNoBank = GetItemCountAll(id, false)
     if countNoBank and countNoBank > 0 then
         local bound = FindBoundInBags(id, 0, _G.NUM_BAG_SLOTS or 4)
         if bound == true then
-            if CalledFromBonusRollPreview() then return "", false end
-            return false
+            if fromPreview then return false, "" end
+            return false, ""
         end
-        if CalledFromBonusRollPreview() then return FAVORITE_LABEL, true end
+        if fromPreview then return true, FAVORITE_LABEL end
         return true, FAVORITE_LABEL
     end
 
     local countWithBank = GetItemCountAll(id, true)
     if countWithBank and countWithBank > 0 then
         if not IsBankOpen() then
-            if CalledFromBonusRollPreview() then return FAVORITE_LABEL, true end
+            if fromPreview then return true, FAVORITE_LABEL end
             return true, FAVORITE_LABEL
         end
         local bankContainer = _G.BANK_CONTAINER or -1
         local boundBank = FindBoundInBags(id, bankContainer, bankContainer)
         if boundBank == true then
-            if CalledFromBonusRollPreview() then return "", false end
-            return false
+            if fromPreview then return false, "" end
+            return false, ""
         end
         local numBankBags = _G.NUM_BANKBAGSLOTS or 0
         if numBankBags > 0 then
@@ -120,14 +122,14 @@ function api:IsFavorite(itemID)
             local lastBankBag = firstBankBag + numBankBags - 1
             local boundBags = FindBoundInBags(id, firstBankBag, lastBankBag)
             if boundBags == true then
-                if CalledFromBonusRollPreview() then return "", false end
-                return false
+                if fromPreview then return false, "" end
+                return false, ""
             end
         end
-        if CalledFromBonusRollPreview() then return FAVORITE_LABEL, true end
+        if fromPreview then return true, FAVORITE_LABEL end
         return true, FAVORITE_LABEL
     end
 
-    if CalledFromBonusRollPreview() then return FAVORITE_LABEL, true end
+    if fromPreview then return true, FAVORITE_LABEL end
     return true, FAVORITE_LABEL
 end
