@@ -114,6 +114,7 @@ local function FormatSince(timestamp)
     local days = math.floor(diff / 86400)
     local weeks = math.floor(days / 7)
     local remDays = days - (weeks * 7)
+    local remHours = math.floor((diff - (days * 86400)) / 3600)
     if weeks > 0 then
         local locale = (GetLocale and GetLocale()) or "enUS"
         local isSpanish = locale and locale:lower():find("es")
@@ -124,15 +125,13 @@ local function FormatSince(timestamp)
             weekWord = (weeks == 1) and "week" or "weeks"
         end
         local text = string.format("%d %s", weeks, weekWord)
-        if remDays > 0 then
-            text = string.format("%s %dd", text, remDays)
-        end
+        text = string.format("%s %dd %dh", text, remDays, remHours)
         if weeks > 2 then
             text = "|cffff4040" .. text .. "|r"
         end
         return text
     elseif days > 0 then
-        return string.format("%dd", days)
+        return string.format("%dd %dh", days, remHours)
     end
     local hours = math.floor(diff / 3600)
     if hours > 0 then
@@ -426,6 +425,7 @@ local function AddStatBlock(parent, title, value, yOffset)
     val:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -6)
     val:SetText(value or "")
     SetAccentFont(val, 13)
+
 end
 
 local function BuildLeaderboard(parent, data)

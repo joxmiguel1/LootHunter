@@ -23,6 +23,8 @@ local EnsureHeroicQueuePopup
 local ScheduleHeroicQueueCheck
 local lastHeroicPrompt = 0
 local heroPopupShown = false
+local lastHeroicConfirmedText = nil
+local lastHeroicConfirmedAt = 0
 local charKey = nil
 addonTable.StatsStore = {
     MAX_HISTORY_EVENTS = 200,
@@ -340,7 +342,8 @@ function StatsStore:StartSession(raidName, difficultyName, instanceID)
     return key, db.sessions[key]
 end
 
-function StatsStore:EnsureCurrentSession()
+function StatsStore:EnsureCurrentSession(allowStart)
+    if allowStart == nil then allowStart = false end
     local inInstance, instanceType = IsInInstance()
     if not inInstance or instanceType ~= "raid" then
         self.currentSessionKey = nil
@@ -374,7 +377,10 @@ function StatsStore:EnsureCurrentSession()
     end
     if self.forceNewSession then
         self.forceNewSession = nil
-        return self:StartSession(raidName, difficultyName, instanceID)
+        if allowStart then
+            return self:StartSession(raidName, difficultyName, instanceID)
+        end
+        return nil
     end
     local recent = self:GetMostRecentSession(raidName, instanceID)
     if recent then
@@ -385,7 +391,10 @@ function StatsStore:EnsureCurrentSession()
         recent.deathStart = recent.deathStart or {}
         return recent.key, recent
     end
-    return self:StartSession(raidName, difficultyName, instanceID)
+    if allowStart then
+        return self:StartSession(raidName, difficultyName, instanceID)
+    end
+    return nil
 end
 
 function StatsStore:ResolveClassToken(name)
@@ -418,7 +427,7 @@ function StatsStore:ResolveClassToken(name)
 end
 
 function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, rollValue, wonViaRoll, boss, isBonusLoot)
-    local key, session = self:EnsureCurrentSession()
+    local key, session = self:EnsureCurrentSession(true)
     if not key or not session then return end
     -- Skip poor/common-quality items (gray/white) in the session drop log.
     if itemID and GetItemInfo then
@@ -515,7 +524,7 @@ function StatsStore:GetSessionByKey(key)
 end
 
 function StatsStore:AddDeath(name)
-    local _, session = self:EnsureCurrentSession()
+    local _, session = self:EnsureCurrentSession(false)
     if not session and self.currentSessionKey then
         local db = self:EnsureSessionDB()
         if db and db.sessions then
@@ -534,7 +543,7 @@ end
 
 function StatsStore:AddRevive(name)
     name = name or "Unknown"
-    local _, session = self:EnsureCurrentSession()
+    local _, session = self:EnsureCurrentSession(false)
     if not session and self.currentSessionKey then
         local db = self:EnsureSessionDB()
         if db and db.sessions then
@@ -559,7 +568,7 @@ function StatsStore:CloseCurrentSession(reason)
 end
 
 function StatsStore:EndDeathTimer(name)
-    local _, session = self:EnsureCurrentSession()
+    local _, session = self:EnsureCurrentSession(false)
     if not session and self.currentSessionKey then
         local db = self:EnsureSessionDB()
         if db and db.sessions then
@@ -1950,12 +1959,18 @@ addonTable.ShowCoinReminderVisual = ShowCoinReminderVisual
 local function HandleBossKill(event, encounterID, bossName)
     if not bossName or bossName == "" then return end
     LogCoinDebug(string.format("BOSS_KILL detected: %s (encounterID=%s)", bossName or "?", tostring(encounterID)))
+    if StatsStore then
+        StatsStore:EnsureCurrentSession(true)
+    end
     ScheduleCoinReminder(encounterID, bossName)
 end
 local function HandleEncounterEnd(event, encounterID, bossName, _, endStatus)
     if endStatus == 1 then -- 1 significa éxito
         if not bossName or bossName == "" then return end
         LogCoinDebug(string.format("ENCOUNTER_END success detected: %s (encounterID=%s)", bossName or "?", tostring(encounterID)))
+        if StatsStore then
+            StatsStore:EnsureCurrentSession(true)
+        end
         ScheduleCoinReminder(encounterID, bossName)
     end
 end
@@ -1981,6 +1996,24 @@ local function BuildSelfLootPatterns()
         if type(fmt) == "string" and fmt ~= "" then
             local pattern = "^" .. fmt:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
             table.insert(patterns, { pattern = pattern, isBonusRoll = entry.bonus })
+        end
+    end
+    return patterns
+end
+
+local function BuildCreatedLootPatterns()
+    local patterns = {}
+    local formats = {
+        LOOT_ITEM_CREATED_SELF,
+        LOOT_ITEM_CREATED_SELF_MULTIPLE,
+        LOOT_ITEM_CREATED,
+        LOOT_ITEM_CREATED_MULTIPLE,
+    }
+    for _, fmt in ipairs(formats) do
+        fmt = NormalizeLootFormat(fmt)
+        if type(fmt) == "string" and fmt ~= "" then
+            local pattern = "^" .. fmt:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
+            table.insert(patterns, pattern)
         end
     end
     return patterns
@@ -2045,6 +2078,7 @@ local function BuildBonusRollMarkers()
 end
 
 local selfLootPatterns = BuildSelfLootPatterns()
+local createdLootPatterns = BuildCreatedLootPatterns()
 local otherLootPatterns = BuildOtherLootPatterns()
 local bonusRollMarkers = BuildBonusRollMarkers()
 addonTable.RecentRolls = addonTable.RecentRolls or {}
@@ -2117,12 +2151,12 @@ local function HandleInstanceChange(event)
                         StatsStore.forceNewSession = true
                     end
                 end
-                StatsStore:EnsureCurrentSession()
+                StatsStore:EnsureCurrentSession(false)
             end)
         end
     end
     lastInRaid = nowInRaid
-    StatsStore:EnsureCurrentSession()
+    StatsStore:EnsureCurrentSession(false)
 end
 
 IsScopeAllowed = function(scope)
@@ -2193,6 +2227,13 @@ local function HandleChatSystem(event, msg, ...)
 end
 local function HandleChatLoot(event, msg, ...)
     if not CurrentCharDB or type(msg) ~= "string" then return end
+    if createdLootPatterns then
+        for _, pattern in ipairs(createdLootPatterns) do
+            if msg:match(pattern) then
+                return
+            end
+        end
+    end
     local itemLink, playerName
     local isMine = false
     local lootViaBonusRoll = false
@@ -2754,7 +2795,14 @@ local function PromptHeroicQueueIfNeeded(force)
     end
     local text = GetActiveQueueText()
     HeroicLog(string.format("Queue text=%s", tostring(text)))
-    if not text or text == "" then return end
+    if not text or text == "" then
+        lastHeroicConfirmedText = nil
+        return
+    end
+    if text == lastHeroicConfirmedText then
+        HeroicLog("Skipping heroic popup: already confirmed for current queue")
+        return
+    end
     local lower = string.lower(text)
     if not (lower:find("heroic", 1, true) or lower:find("heroico", 1, true)) then return end
     local now = GetTime and GetTime() or 0
@@ -2782,8 +2830,14 @@ local function PromptHeroicQueueIfNeeded(force)
         dialog.text = HEROIC_ALERT_ICON .. (L["HEROIC_QUEUE_ALREADY"] or "You are already queued for a heroic random dungeon. Continue?")
         dialog.button1 = L["HEROIC_QUEUE_CONFIRM_YES"] or "Yes, continue"
         dialog.button2 = L["HEROIC_QUEUE_CONFIRM_NO"] or "No, cancel queue"
-        dialog.OnAccept = function() end
+        dialog.OnAccept = function()
+            lastHeroicConfirmedText = text
+            lastHeroicConfirmedAt = now
+            heroPopupShown = false
+        end
         dialog.OnCancel = function()
+            heroPopupShown = false
+            lastHeroicConfirmedText = nil
             SafeLeaveLFG()
         end
         heroPopupShown = true
@@ -2794,7 +2848,6 @@ end
 
 local function ScheduleHeroicQueueCheck()
     if not C_Timer or not C_Timer.After then return end
-    heroPopupShown = false
     C_Timer.After(0.1, PromptHeroicQueueIfNeeded)
     C_Timer.After(0.4, PromptHeroicQueueIfNeeded)
     C_Timer.After(1.0, PromptHeroicQueueIfNeeded)
