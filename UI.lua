@@ -494,6 +494,51 @@ if type(StaticPopupDialogs) == "table" then
     StaticPopupDialogs["LOOTHUNTER_CONFIRM_RESET"] = LOOTHUNTER_CONFIRM_RESET
 end
 
+local LOOTHUNTER_CONFIRM_CLEAR_LOG = {
+    text = L["LOG_CLEAR_CONFIRM"] or "Clear debug log?",
+    button1 = OKAY,
+    button2 = CANCEL,
+    OnAccept = function()
+        if LootHunterDB then
+            LootHunterDB.debugLog = {}
+        end
+        if addonTable then
+            addonTable.DebugLog = {}
+        end
+        if addonTable and addonTable.RefreshLogPanel then
+            addonTable.RefreshLogPanel()
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+    showAlert = 1,
+}
+if type(StaticPopupDialogs) == "table" then
+    StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR_LOG"] = LOOTHUNTER_CONFIRM_CLEAR_LOG
+end
+
+local LOOTHUNTER_CONFIRM_DISABLE_LOGS = {
+    text = L["LOG_DISABLE_CONFIRM"] or "Disable debug logs? This will reload the UI.",
+    button1 = OKAY,
+    button2 = CANCEL,
+    OnAccept = function()
+        if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.general then
+            LootHunterDB.settings.general.debugLogging = false
+        end
+        ReloadUI()
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+    showAlert = 1,
+}
+if type(StaticPopupDialogs) == "table" then
+    StaticPopupDialogs["LOOTHUNTER_CONFIRM_DISABLE_LOGS"] = LOOTHUNTER_CONFIRM_DISABLE_LOGS
+end
+
 -- === FUNCIONES DE UI ===
 
 local function IsDebugLoggingEnabled()
@@ -1889,16 +1934,43 @@ function LootHunter_CreateGUI()
     panelLog:SetPoint("BOTTOMRIGHT", 0, 30)
     panelLog:Hide()
 
-    local btnCopyLog = CreateFrame("Button", nil, panelLog, "BackdropTemplate")
-    btnCopyLog:SetSize(70, 20)
-    btnCopyLog:SetPoint("TOPRIGHT", panelLog, "TOPRIGHT", -5, -5)
-    btnCopyLog:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+    local function CreateLogButton(text, width)
+        local btn = CreateFrame("Button", nil, panelLog, "BackdropTemplate")
+        btn:SetSize(width or 80, 20)
+        btn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+        btn:SetBackdropBorderColor(0, 0, 0, 1)
+        btn:SetNormalFontObject("GameFontHighlightSmall")
+        btn:SetText(text)
+        return btn
+    end
+
+    local btnCopyLog = CreateLogButton(L["BTN_EXPORT_LOG"], 80)
+    btnCopyLog:SetPoint("TOPLEFT", panelLog, "TOPLEFT", 5, -5)
     btnCopyLog:SetBackdropColor(0.2, 0.4, 0.2, 1)
-    btnCopyLog:SetBackdropBorderColor(0, 0, 0, 1)
-    btnCopyLog:SetNormalFontObject("GameFontHighlightSmall")
-    btnCopyLog:SetText(L["BTN_EXPORT_LOG"])
     btnCopyLog:SetScript("OnClick", addonTable.CreateCopyLogWindow)
     btnCopyLog:SetShown(debugMode)
+
+    local btnClearLog = CreateLogButton(L["BTN_CLEAR_LOG"], 80)
+    btnClearLog:SetPoint("LEFT", btnCopyLog, "RIGHT", 6, 0)
+    btnClearLog:SetBackdropColor(0.45, 0.2, 0.2, 1)
+    btnClearLog:SetScript("OnClick", function()
+        if StaticPopupDialogs and StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR_LOG"] then
+            StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR_LOG"].text = L["LOG_CLEAR_CONFIRM"] or StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR_LOG"].text
+        end
+        StaticPopup_Show("LOOTHUNTER_CONFIRM_CLEAR_LOG")
+    end)
+    btnClearLog:SetShown(debugMode)
+
+    local btnDisableLog = CreateLogButton(L["BTN_DISABLE_LOGS"], 95)
+    btnDisableLog:SetPoint("LEFT", btnClearLog, "RIGHT", 6, 0)
+    btnDisableLog:SetBackdropColor(0.25, 0.25, 0.25, 1)
+    btnDisableLog:SetScript("OnClick", function()
+        if StaticPopupDialogs and StaticPopupDialogs["LOOTHUNTER_CONFIRM_DISABLE_LOGS"] then
+            StaticPopupDialogs["LOOTHUNTER_CONFIRM_DISABLE_LOGS"].text = L["LOG_DISABLE_CONFIRM"] or StaticPopupDialogs["LOOTHUNTER_CONFIRM_DISABLE_LOGS"].text
+        end
+        StaticPopup_Show("LOOTHUNTER_CONFIRM_DISABLE_LOGS")
+    end)
+    btnDisableLog:SetShown(debugMode)
 
     local logScrollFrame = CreateFrame("ScrollFrame", nil, panelLog, "UIPanelScrollFrameTemplate")
     logScrollFrame:SetPoint("TOPLEFT", 5, -30)
@@ -1912,11 +1984,25 @@ function LootHunter_CreateGUI()
         logScrollChild = CreateFrame("Frame", nil, logScrollFrame)
         logScrollChild:SetSize(280, 1)
         logScrollFrame:SetScrollChild(logScrollChild)
+        logScrollFrame:SetScript("OnSizeChanged", function(self, w)
+            if logScrollChild then
+                local width = math.max(80, (w or self:GetWidth() or 280) - 20)
+                logScrollChild:SetWidth(width)
+            end
+        end)
+        if logScrollFrame:GetWidth() and logScrollChild then
+            local width = math.max(80, logScrollFrame:GetWidth() - 20)
+            logScrollChild:SetWidth(width)
+        end
         local DebugLog = addonTable.DebugLog or {}
+        local function GetLogLineWidth()
+            local w = (logScrollChild and logScrollChild:GetWidth()) or (logScrollFrame and logScrollFrame:GetWidth()) or 280
+            return math.max(80, w - 10)
+        end
         if #DebugLog == 0 then
             local devNotice = logScrollChild:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             devNotice:SetPoint("TOPLEFT", logScrollChild, "TOPLEFT", 5, 0)
-            devNotice:SetWidth(260)
+            devNotice:SetWidth(GetLogLineWidth())
             devNotice:SetJustifyH("LEFT")
             devNotice:SetWordWrap(true)
             devNotice:SetText(L["LOG_DEV_NOTICE"])
@@ -1931,9 +2017,12 @@ function LootHunter_CreateGUI()
             for i = startIdx, #DebugLog do
                 local line = logScrollChild:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 line:SetPoint("TOPLEFT", logScrollChild, "TOPLEFT", 5, yOffset)
-                line:SetWidth(260)
+                line:SetWidth(GetLogLineWidth())
                 line:SetJustifyH("LEFT")
                 line:SetWordWrap(true)
+                if line.SetMaxLines then
+                    line:SetMaxLines(0)
+                end
                 line:SetText(DebugLog[i])
                 yOffset = yOffset - line:GetStringHeight() - 2
             end

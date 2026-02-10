@@ -2,6 +2,13 @@ local _, addonTable = ...
 local L = addonTable.L
 
 local DebugLog = {}
+local LOG_PREFIX_COLOR = "66ccff"
+addonTable.LOG_PREFIX_COLOR = LOG_PREFIX_COLOR
+
+local function FormatLogPrefix(tag)
+    return "|cff" .. LOG_PREFIX_COLOR .. "[" .. tag .. "]|r"
+end
+addonTable.FormatLogPrefix = FormatLogPrefix
 
 local function IsDebugEnabled()
     return LootHunterDB
@@ -11,18 +18,54 @@ local function IsDebugEnabled()
 end
 addonTable.IsDebugEnabled = IsDebugEnabled
 
+local function GetDebugLogMax()
+    if LootHunterDB
+        and LootHunterDB.settings
+        and LootHunterDB.settings.general
+        and LootHunterDB.settings.general.debugLogMax
+    then
+        local max = tonumber(LootHunterDB.settings.general.debugLogMax)
+        if max and max > 0 then
+            return max
+        end
+    end
+    return 1000
+end
+
+local function EnsureDebugLogStore()
+    if LootHunterDB then
+        if type(LootHunterDB.debugLog) ~= "table" then
+            LootHunterDB.debugLog = {}
+        end
+        DebugLog = LootHunterDB.debugLog
+    end
+    addonTable.DebugLog = DebugLog
+    return DebugLog
+end
+
+local function TrimDebugLog(maxEntries)
+    local maxCount = tonumber(maxEntries) or GetDebugLogMax()
+    if not DebugLog or type(DebugLog) ~= "table" or maxCount <= 0 then return end
+    while #DebugLog > maxCount do
+        table.remove(DebugLog, 1)
+    end
+end
+addonTable.TrimDebugLog = TrimDebugLog
+
 local function LogDebug(msg)
     if not IsDebugEnabled() then return end
+    EnsureDebugLogStore()
     table.insert(DebugLog, msg)
+    TrimDebugLog()
     print(msg)
 end
-addonTable.DebugLog = DebugLog
+EnsureDebugLogStore()
 addonTable.LogDebug = LogDebug
 
 addonTable.LogCoinDebug = function(msg)
     if not IsDebugEnabled() then return end
     if addonTable.LogDebug then
-        addonTable.LogDebug("|cff00ffff[Coin Debug]|r " .. msg)
+        addonTable.LogDebug(FormatLogPrefix("Coin Debug") .. " " .. msg)
     end
 end
 

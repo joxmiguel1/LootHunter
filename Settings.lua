@@ -391,7 +391,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
             local db_category, db_key = string.match(key, "([^.]+)%.([^.]+)")
             if addonTable.db and addonTable.db.settings[db_category] then
                 addonTable.db.settings[db_category][db_key] = self.isChecked
-                if key == "general.windowsLocked" then
+                if key == "general.windowsLocked" or key == "general.debugLogging" then
                     ShowReloadDialog()
                 end
             end
@@ -1049,6 +1049,12 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         1,
         L["SETTING_STATS_MAX_SESSIONS_DESC"],
         function(v) return tostring(math.floor(v or 0)) end
+    )
+    Settings:CreateCheckbox(
+        statsPanel,
+        "stats.hideCreatedItems",
+        L["SETTING_STATS_HIDE_CREATED_LABEL"],
+        L["SETTING_STATS_HIDE_CREATED_DESC"]
     )
     -- Salto de línea después del slider
     if statsPanel._layout and statsPanel._layout[#statsPanel._layout] then

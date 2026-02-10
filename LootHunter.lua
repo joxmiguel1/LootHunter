@@ -11,6 +11,7 @@ local BuildStaticDB
 local ResolveAllUnknownSources
 local LogCoinDebug = addonTable.LogCoinDebug or function() end
 local LogDebug = addonTable.LogDebug or function() end
+local FormatLogPrefix = addonTable.FormatLogPrefix
 local GetCurrentSpecName
 local IsScopeAllowed
 local IsBonusRollWindowVisible
@@ -70,7 +71,7 @@ end
 local function HeroicLog(msg)
     if not LogDebug then return end
     local t = GetTime and GetTime() or 0
-    LogDebug(string.format("[HeroicQueue][%0.2f] %s", t, msg))
+    LogDebug(string.format("%s[%0.2f] %s", FormatLogPrefix("HeroicQueue"), t, msg))
 end
 local currentRandomDungeonID = nil -- selección actual del dropdown/random
 local currentRandomDungeonName = nil -- texto visible del dropdown
@@ -353,16 +354,26 @@ function StatsStore:EnsureCurrentSession(allowStart)
     if not raidName then return nil end
     local db = self:EnsureSessionDB()
     if not db then return nil end
+    local now = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
+    local nowDay = (date and now and now > 0) and date("%Y-%m-%d", now) or nil
     if self.currentSessionKey and db.sessions[self.currentSessionKey] then
         local sess = db.sessions[self.currentSessionKey]
         if sess.closedAt then
             self.currentSessionKey = nil
-        elseif sess.raidName == raidName and (not sess.instanceID or not instanceID or sess.instanceID == instanceID) then
-            sess.deaths = sess.deaths or {}
-            sess.revives = sess.revives or {}
-            sess.deadTime = sess.deadTime or {}
-            sess.deathStart = sess.deathStart or {}
-            return self.currentSessionKey, sess
+        else
+            local lastEvent = sess.lastEventAt or sess.startedAt or 0
+            local lastDay = (nowDay and lastEvent and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
+            if nowDay and lastDay and lastDay ~= nowDay then
+                sess.closedAt = now
+                sess.closedReason = "new_day"
+                self.currentSessionKey = nil
+            elseif sess.raidName == raidName and (not sess.instanceID or not instanceID or sess.instanceID == instanceID) then
+                sess.deaths = sess.deaths or {}
+                sess.revives = sess.revives or {}
+                sess.deadTime = sess.deadTime or {}
+                sess.deathStart = sess.deathStart or {}
+                return self.currentSessionKey, sess
+            end
         end
     end
     if self.currentSessionKey and db.sessions[self.currentSessionKey] then
@@ -384,12 +395,19 @@ function StatsStore:EnsureCurrentSession(allowStart)
     end
     local recent = self:GetMostRecentSession(raidName, instanceID)
     if recent then
-        self.currentSessionKey = recent.key
-        recent.deaths = recent.deaths or {}
-        recent.revives = recent.revives or {}
-        recent.deadTime = recent.deadTime or {}
-        recent.deathStart = recent.deathStart or {}
-        return recent.key, recent
+        local lastEvent = recent.lastEventAt or recent.startedAt or 0
+        local lastDay = (nowDay and lastEvent and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
+        if nowDay and lastDay and lastDay ~= nowDay then
+            recent.closedAt = now
+            recent.closedReason = "new_day"
+        else
+            self.currentSessionKey = recent.key
+            recent.deaths = recent.deaths or {}
+            recent.revives = recent.revives or {}
+            recent.deadTime = recent.deadTime or {}
+            recent.deathStart = recent.deathStart or {}
+            return recent.key, recent
+        end
     end
     if allowStart then
         return self:StartSession(raidName, difficultyName, instanceID)
@@ -426,6 +444,34 @@ function StatsStore:ResolveClassToken(name)
     return nil
 end
 
+function StatsStore:ItemIsCreatedBy(link)
+    if not link then return false end
+    local tooltip = self._createdByTooltip
+    if not tooltip then
+        tooltip = CreateFrame("GameTooltip", "LootHunterCreatedByTooltip", UIParent, "GameTooltipTemplate")
+        tooltip:SetOwner(UIParent, "ANCHOR_NONE")
+        self._createdByTooltip = tooltip
+    end
+    tooltip:ClearLines()
+    tooltip:SetHyperlink(link)
+    local pattern = self._createdByPattern
+    if not pattern then
+        local base = _G.ITEM_CREATED_BY or "Created by %s"
+        local esc = base:gsub("([%%%^%$%(%)%.%[%]%*%+%-%?])", "%%%1")
+        esc = esc:gsub("%%s", ".+")
+        pattern = esc
+        self._createdByPattern = pattern
+    end
+    for i = 2, tooltip:NumLines() do
+        local line = _G["LootHunterCreatedByTooltipTextLeft" .. i]
+        local text = line and line:GetText()
+        if text and text:match(pattern) then
+            return true
+        end
+    end
+    return false
+end
+
 function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, rollValue, wonViaRoll, boss, isBonusLoot)
     local key, session = self:EnsureCurrentSession(true)
     if not key or not session then return end
@@ -433,6 +479,15 @@ function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, ro
     if itemID and GetItemInfo then
         local _, _, quality = GetItemInfo(itemID)
         if quality ~= nil and quality <= 1 then
+            return
+        end
+    end
+    if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.stats and LootHunterDB.settings.stats.hideCreatedItems then
+        local scanLink = link
+        if not scanLink and itemID and GetItemInfo then
+            scanLink = select(2, GetItemInfo(itemID))
+        end
+        if scanLink and self:ItemIsCreatedBy(scanLink) then
             return
         end
     end
@@ -811,7 +866,7 @@ local function EnqueueAlert(duration, priority, fn)
 end
 local function LogAlertDebug(msg)
     if addonTable and addonTable.LogDebug then
-        addonTable.LogDebug("|cff00ff00[Alert]|r " .. msg)
+        addonTable.LogDebug(FormatLogPrefix("Alert") .. " " .. msg)
     end
 end
 local function GetCoinReminderWait()
@@ -890,12 +945,14 @@ local function InitializeSettings()
         general = {
             windowsLocked = true,
             debugLogging = false,
+            debugLogMax = 1000,
             language = "AUTO",
             helpSeen = false,
             uiScale = 1.0,
         },
         stats = {
             maxSessions = 25,
+            hideCreatedItems = true,
         },
     }
     if not LootHunterDB.settings then
@@ -1677,7 +1734,7 @@ local function ProcessCoinReminder(key)
         for _, data in ipairs(stillMissing) do
             table.insert(names, data.name or tostring(data.id))
         end
-        addonTable.LogDebug("|cffffff00[Loot Hunter] Coin reminder triggered: " .. entry.boss .. " -> " .. table.concat(names, ", ") .. "|r")
+        addonTable.LogDebug(FormatLogPrefix("Loot Hunter") .. " Coin reminder triggered: " .. entry.boss .. " -> " .. table.concat(names, ", "))
     end
 end
 local function StartCoinReminderTimer(key, reason, delay)
@@ -1752,7 +1809,7 @@ local function RecordCoinUsedOnce(reason)
     StatsStore:RecordHistoryEvent("coin_used", { boss = LastCoinReminderBoss, player = UnitName("player"), reason = reason })
 end
 local function HandleBonusRollActivate(event, ...)
-    LogCoinDebug("|cff00ffff[Coin Debug]|r BONUS_ROLL_ACTIVATE received")
+    LogCoinDebug(FormatLogPrefix("Coin Debug") .. " BONUS_ROLL_ACTIVATE received")
     LogCoinDebug(string.format("Bonus roll window visible: %s", tostring(IsBonusRollWindowVisible())))
     RecordCoinUsedOnce("bonus_roll_activate")
     -- Iniciar secuencia de 2 fases (10s aviso -> 35s alerta)
@@ -1771,7 +1828,7 @@ end
 local function HandleUnitAura(event, unit)
     if unit ~= "player" then return end
     if HasBonusRollBuff() then
-        LogCoinDebug("|cff00ffff[Coin Debug]|r Bonus Roll buff detected")
+        LogCoinDebug(FormatLogPrefix("Coin Debug") .. " Bonus Roll buff detected")
         ActivatePendingForBonusRoll("bonus_roll_buff")
     end
 end
@@ -1854,7 +1911,7 @@ local function ScheduleCoinReminder(encounterID, bossName, forceRaid, forcePreWa
             local windowVisible = IsBonusRollWindowVisible()
             if windowVisible or forcePreWarn then
                 LogCoinDebug(string.format("Pre-warning window visible for %s: %s", entry.boss or "Unknown", tostring(windowVisible)))
-                local msg = string.format(L["COIN_PRE_WARNING"] or "|cff00ff00[Loot Hunter]|r %s might have your loot. Get your coin ready!", entry.boss)
+                local msg = string.format(L["COIN_PRE_WARNING"] or (FormatLogPrefix("Loot Hunter") .. " %s might have your loot. Get your coin ready!"), entry.boss)
                 if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
                     DEFAULT_CHAT_FRAME:AddMessage(msg)
                 else
@@ -2137,6 +2194,12 @@ local function HandleInstanceChange(event)
     local inInstance, instanceType = IsInInstance()
     local nowInRaid = inInstance and instanceType == "raid"
     local stillInRaidGroup = IsInRaid and IsInRaid() or false
+    if nowInRaid and not lastInRaid then
+        if StatsStore then
+            StatsStore.forceNewSession = true
+            StatsStore:EnsureCurrentSession(true)
+        end
+    end
     if lastInRaid and (not nowInRaid or not stillInRaidGroup) then
         if not pendingRaidExitCheck and C_Timer and C_Timer.After then
             pendingRaidExitCheck = true
@@ -2209,7 +2272,7 @@ local function HandleChatSystem(event, msg, ...)
     if not (name == playerName or name == you or (youCaps and name == youCaps)) then
         addonTable.RecentRolls[normalized] = { value = tonumber(rollVal), time = now }
         if LogDebug then
-            LogDebug(string.format("|cff00ff00[Roll]|r Other roll detected: player=%s value=%s", tostring(normalized), tostring(rollVal)))
+            LogDebug(string.format("%s Other roll detected: player=%s value=%s", FormatLogPrefix("Roll"), tostring(normalized), tostring(rollVal)))
         end
         return
     end
@@ -2222,7 +2285,7 @@ local function HandleChatSystem(event, msg, ...)
         lastPlayerRollItemID = nil
     end
     if LogDebug then
-        LogDebug(string.format("|cff00ff00[Roll]|r Player roll detected: value=%s item=%s", tostring(rollVal), tostring(lastPlayerRollItemID)))
+        LogDebug(string.format("%s Player roll detected: value=%s item=%s", FormatLogPrefix("Roll"), tostring(rollVal), tostring(lastPlayerRollItemID)))
     end
 end
 local function HandleChatLoot(event, msg, ...)
@@ -2283,7 +2346,8 @@ local function HandleChatLoot(event, msg, ...)
         end
     end
     if LogDebug then
-        LogDebug(string.format("|cff00ff00[Alert]|r Loot chat detected: item=%s (id=%s) source=%s player=%s tracked=%s bonus=%s",
+        LogDebug(string.format("%s Loot chat detected: item=%s (id=%s) source=%s player=%s tracked=%s bonus=%s",
+            FormatLogPrefix("Alert"),
             tostring(itemLink),
             tostring(id),
             isMine and "self" or "other",
@@ -2299,15 +2363,20 @@ local function HandleChatLoot(event, msg, ...)
     end
     if not isMine and playerName and LogDebug then
         if playerRollValue ~= nil then
-            LogDebug(string.format("|cff00ff00[Roll]|r Applied other roll to session: player=%s value=%s item=%s",
+            LogDebug(string.format("%s Applied other roll to session: player=%s value=%s item=%s",
+                FormatLogPrefix("Roll"),
                 tostring(NormalizeUnitName(playerName)), tostring(playerRollValue), tostring(id)))
         else
-            LogDebug(string.format("|cff00ff00[Roll]|r No roll applied for other player=%s (dice icon will be check if no bonus).",
+            LogDebug(string.format("%s No roll applied for other player=%s (dice icon will be check if no bonus).",
+                FormatLogPrefix("Roll"),
                 tostring(NormalizeUnitName(playerName))))
         end
     end
     local skipSessionLog = tradeActive and isMine
     if not skipSessionLog then
+        if StatsStore then
+            StatsStore:EnsureCurrentSession(true)
+        end
         StatsStore:AddSessionLootEntry(id, itemLink, playerName or (isMine and UnitName("player")) or playerName, nil, playerRollValue, playerRollValue ~= nil, nil, lootViaBonusRoll)
     end
     if CurrentCharDB[id] then
@@ -2369,7 +2438,7 @@ local function HandleChatLoot(event, msg, ...)
                     LogAlertDebug(string.format("OTHER_WON alert shown for item %s (via %s)", tostring(id), viaRoll and "roll" or "recent drop"))
                     if LogDebug then
                         local reason = viaRoll and "roll" or "recent drop"
-                        LogDebug(string.format("|cff00ff00[Alert]|r OTHER_WON item=%s reason=%s looter=%s", tostring(id), reason, tostring(playerName or "?")))
+                        LogDebug(string.format("%s OTHER_WON item=%s reason=%s looter=%s", FormatLogPrefix("Alert"), tostring(id), reason, tostring(playerName or "?")))
                     end
                     if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder
                         and LootHunterDB.settings.coinReminder.enabled
@@ -2706,7 +2775,7 @@ local function AddTrackedInfoToMerchantTooltip(target)
     local isEquipped = IsItemEquipped(itemID)
 
     if isTracked or isEquipped then
-        local header = "|cff00ff00[Loot Hunter]|r"
+        local header = FormatLogPrefix("Loot Hunter")
         if isEquipped then
             -- Tracked AND Equipped
             GameTooltip:AddLine(header)
@@ -3155,7 +3224,7 @@ local function EnsureEJLoaded()
     end
     EJUnavailable = true
     if LogDebug and not EJUnavailableLogged then
-        LogDebug("|cffff0000[EJ]|r Encounter Journal no disponible; omitiendo resolución hasta /reload")
+        LogDebug(FormatLogPrefix("EJ") .. " Encounter Journal no disponible; omitiendo resolución hasta /reload")
         EJUnavailableLogged = true
     end
     return false
@@ -3196,11 +3265,11 @@ local function ResolveSourceFromEJ(itemID)
             local instID = instFromBoss or instanceID
             local instanceName = instanceInfoFunc and (instID and instanceInfoFunc(instID) or (instanceID and instanceInfoFunc(instanceID))) or nil
             if instanceName and bossName then
-                if LogDebug then LogDebug("|cff00ff00[EJ]|r Resuelta fuente (directo) para item " .. itemID .. ": " .. instanceName .. " - " .. bossName) end
+                if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " Resuelta fuente (directo) para item " .. itemID .. ": " .. instanceName .. " - " .. bossName) end
                 return instanceName .. " - " .. bossName
             end
             if bossName or instanceName then
-                if LogDebug then LogDebug("|cff00ff00[EJ]|r Resuelta fuente (directo) para item " .. itemID .. ": " .. (bossName or instanceName)) end
+                if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " Resuelta fuente (directo) para item " .. itemID .. ": " .. (bossName or instanceName)) end
                 return bossName or instanceName
             end
         end
@@ -3222,10 +3291,10 @@ local function ResolveSourceFromEJ(itemID)
                     if not info then break end
                     if info.itemID == itemID then
                         if instName and bossName then
-                            if LogDebug then LogDebug("|cff00ff00[EJ]|r Resuelta fuente para item " .. itemID .. ": " .. instName .. " - " .. bossName) end
+                            if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " Resuelta fuente para item " .. itemID .. ": " .. instName .. " - " .. bossName) end
                             return instName .. ' - ' .. bossName
                         end
-                        if LogDebug then LogDebug("|cff00ff00[EJ]|r Resuelta fuente para item " .. itemID .. ": " .. (bossName or instName or "??")) end
+                        if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " Resuelta fuente para item " .. itemID .. ": " .. (bossName or instName or "??")) end
                         return bossName or instName
                     end
                     lootIndex = lootIndex + 1
@@ -3245,7 +3314,7 @@ local function TryResolveSourceAsync(itemID)
         if EJUnavailable then return end
         local entry = CurrentCharDB[itemID]
         if not entry or (entry.boss and entry.boss ~= '' and entry.boss ~= L['UNKNOWN_SOURCE']) then return end
-        if LogDebug then LogDebug("|cffffd700[EJ]|r Intentando resolver fuente via EJ para item " .. tostring(itemID)) end
+        if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " Intentando resolver fuente via EJ para item " .. tostring(itemID)) end
         local src, errFlag = ResolveSourceFromEJ(itemID)
         if errFlag == "EJ_UNAVAILABLE" then
             EJUnavailable = true
@@ -3256,7 +3325,7 @@ local function TryResolveSourceAsync(itemID)
             LootHunter_RefreshUI()
             if addonTable.RefreshLogPanel then addonTable.RefreshLogPanel() end
         else
-            if LogDebug then LogDebug("|cffff0000[EJ]|r No se encontró fuente para item " .. tostring(itemID) .. " en EJ") end
+            if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " No se encontró fuente para item " .. tostring(itemID) .. " en EJ") end
         end
     end)
 end
@@ -3293,13 +3362,12 @@ local function _BuildStaticDB()
 end
 BuildStaticDB = _BuildStaticDB
 -- Función para obtener información del item desde la cache
-local function GetItemSourceFromCache(itemID)
+function addonTable.GetItemSourceFromCache(itemID)
     if LootSourceCache[itemID] then
         return LootSourceCache[itemID]
     end
     return nil
 end
-addonTable.GetItemSourceFromCache = GetItemSourceFromCache
 function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
     if not itemLink then return end
     local id = string.match(itemLink, "item:(%d+)")
@@ -3439,14 +3507,14 @@ function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
     end
 end
 
-local function ParseItemArg(arg)
+function addonTable.ParseItemArg(arg)
     if not arg or arg == "" then return nil, nil end
     local link = arg:match("|Hitem:.-|h.-|h") or arg
     local id = tonumber(link:match("item:(%d+)")) or tonumber(link)
     return id, link
 end
 
-local function EnsureItemEntry(itemID, itemLink)
+function addonTable.EnsureItemEntry(itemID, itemLink)
     if not itemID then return nil end
     if CurrentCharDB and CurrentCharDB[itemID] then
         return CurrentCharDB[itemID]
@@ -3505,12 +3573,12 @@ end
 SLASH_LOOTHUNTER_DROP1 = "/lh_drop"
 SlashCmdList["LOOTHUNTER_DROP"] = function(msg)
     if not CurrentCharDB then return end
-    local itemID, itemLink = ParseItemArg(msg or "")
+    local itemID, itemLink = addonTable.ParseItemArg(msg or "")
     if not itemID then
         print("[Loot Hunter] Usage: /lh_drop <itemID or itemLink>")
         return
     end
-    local entry = EnsureItemEntry(itemID, itemLink)
+    local entry = addonTable.EnsureItemEntry(itemID, itemLink)
     ShowDropAlert(itemID, entry)
     LootHunter_RefreshUI()
 end
@@ -3519,12 +3587,12 @@ end
 SLASH_LOOTHUNTER_WON1 = "/lh_won"
 SlashCmdList["LOOTHUNTER_WON"] = function(msg)
     if not CurrentCharDB then return end
-    local itemID, itemLink = ParseItemArg(msg or "")
+    local itemID, itemLink = addonTable.ParseItemArg(msg or "")
     if not itemID then
         print("[Loot Hunter] Usage: /lh_won <itemID or itemLink>")
         return
     end
-    local entry = EnsureItemEntry(itemID, itemLink)
+    local entry = addonTable.EnsureItemEntry(itemID, itemLink)
     if entry and entry.status ~= 2 then
         entry.status = 2
         entry.lastState = "won"

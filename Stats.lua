@@ -7,8 +7,6 @@ local TEX_BAG = "Interface\\Buttons\\UI-CheckBox-Check"
 local TEX_EQUIPPED = "Interface\\AddOns\\LootHunter\\Textures\\icon_equipped.tga"
 local TEX_EQUIPPED_FALLBACK = "Interface\\RaidFrame\\ReadyCheck-Ready"
 local TEX_BONUS = "Interface\\Icons\\inv_misc_elvencoins"
-local TEX_SPEAKER = "Interface\\AddOns\\LootHunter\\Textures\\icon_alert.tga"
-local ENABLE_LEADERBOARD = false
 local selectedSessionKey = nil
 local sessionMenuFrame, sessionMenuOverlay = nil, nil
 
@@ -98,15 +96,6 @@ local function GetHistoryData()
     return { drops = 0, wins = 0, losses = 0, coinReminders = 0, coinsUsed = 0, bossNoLoot = 0, lastWinAt = nil }
 end
 
-local function GetLatestSession()
-    if not addonTable.GetSessionList then return nil end
-    local list = addonTable.GetSessionList()
-    if list and #list > 0 then
-        return list[1]
-    end
-    return nil
-end
-
 local function FormatSince(timestamp)
     if not timestamp then return "--" end
     local now = (type(time) == "function" and time()) or 0
@@ -157,15 +146,6 @@ local function GetCurrentListStats()
         end
     end
     return tracked, pending, won, priority
-end
-
-local function FormatCountWithPercent(count, total)
-    total = total or 0
-    if total <= 0 then return tostring(count or 0) end
-    local pct = math.floor(((count or 0) / total) * 100 + 0.5)
-    local pctColor = "|cff555555"
-    local reset = "|r"
-    return string.format("%d %s(%d%%)%s", count or 0, pctColor, pct, reset)
 end
 
 local function RGBToHex(r, g, b)
@@ -245,49 +225,6 @@ local function BuildWallOfShameLines(session)
     table.insert(lines, string.format(L["STATS_WALL_REVIVES"] or "More times revived - %s (%s)", reviveName or "N/A", reviveCount or 0))
     table.insert(lines, string.format(L["STATS_WALL_DEADTIME"] or "Most time dead - %s (%s)", deadTimeName or "N/A", FormatDeadTime(deadTimeSeconds)))
     return lines
-end
-
-local function AnnounceSessionToGuild(session, leaderboard)
-    local raidName = (session and session.raidName) or (leaderboard and leaderboard.raidName) or "Raid"
-    local dateStr = (session and session.startedAt and type(date) == "function") and date("%m/%d/%Y", session.startedAt) or (date and date("%m/%d/%Y") or "")
-    local lb = leaderboard or {}
-
-    local function row(text)
-        return tostring(text or "")
-    end
-    local lines = {}
-    local sep = "+----------------------------------------+"
-    table.insert(lines, row(L["STATS_ANNOUNCE_GUILD_HEADER"]))
-    table.insert(lines, row(string.format(L["STATS_ANNOUNCE_GUILD_DATE"], raidName, dateStr ~= "" and dateStr or "N/A")))
-    table.insert(lines, sep)
-    table.insert(lines, row("TOP DROPS"))
-    local placements = { "1st", "2nd", "3rd" }
-    for i = 1, 3 do
-        local entry = lb[i]
-        local txt
-        if entry and entry.name and entry.name ~= "" then
-            txt = string.format("%s - %s (%d items)", placements[i], entry.name, entry.count or 0)
-        else
-            txt = string.format("%s - --", placements[i])
-        end
-        table.insert(lines, row(txt))
-    end
-    table.insert(lines, sep)
-    table.insert(lines, row(L["STATS_ANNOUNCE_GUILD_WALL"]))
-    table.insert(lines, sep)
-    local deathName, deathCount, reviveName, reviveCount, deadTimeName, deadTimeSeconds = GetWallOfShame(session)
-    table.insert(lines, row(string.format(L["STATS_WALL_DEATHS"], deathName or "N/A", deathCount or 0)))
-    table.insert(lines, row(string.format(L["STATS_WALL_REVIVES"], reviveName or "N/A", reviveCount or 0)))
-    table.insert(lines, row(string.format(L["STATS_WALL_DEADTIME"] or "Most time dead - %s (%s)", deadTimeName or "N/A", FormatDeadTime(deadTimeSeconds))))
-    table.insert(lines, sep)
-    for _, line in ipairs(lines) do
-        if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-            DEFAULT_CHAT_FRAME:AddMessage(line)
-        else
-            print(line)
-        end
-    end
-    print(L["STATS_ANNOUNCE_SENT"])
 end
 
 local function EnsureSessionSelection()
@@ -428,96 +365,6 @@ local function AddStatBlock(parent, title, value, yOffset)
 
 end
 
-local function BuildLeaderboard(parent, data)
-    SafeSetBackdrop(parent, { bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 }, { 0, 0, 0, 0.15 }, { 0, 0, 0, 0.25 })
-
-    local columns = {}
-    for i = 1, 3 do
-        local col = CreateFrame("Frame", nil, parent)
-        col:SetSize(80, 140)
-        columns[i] = col
-        col:Hide()
-    end
-
-    local classColors = _G.RAID_CLASS_COLORS or {}
-    local function GetClassColor(classToken)
-        local c = classColors[classToken or ""] or {}
-        return c.r or 1, c.g or 1, c.b or 1
-    end
-
-    local medalTextures = {
-        "Interface\\AddOns\\LootHunter\\Textures\\icon_second.tga", -- second place (left)
-        "Interface\\AddOns\\LootHunter\\Textures\\icon_first.tga",  -- first place (center)
-        "Interface\\AddOns\\LootHunter\\Textures\\icon_third.tga",  -- third place (right)
-    }
-
-    local slotData = {}
-    if data and #data > 0 then
-        slotData[2] = data[1] -- first place center
-        if data[2] then slotData[1] = data[2] end -- second place left
-        if data[3] then slotData[3] = data[3] end -- third place right
-    end
-
-    local function LayoutColumns()
-        local width = parent:GetWidth() or 0
-        local padding = 14
-        local usable = math.max(120, width - (padding * 2))
-        local colWidth = math.max(70, usable / 3 - 6)
-        local centerX = padding + (usable / 2) - (colWidth / 2)
-        local positions = {
-            padding,        -- left (second place)
-            centerX,        -- center (first place)
-            padding + usable - colWidth, -- right (third place)
-        }
-        for i, col in ipairs(columns) do
-            col:SetWidth(colWidth)
-            col:ClearAllPoints()
-            col:SetPoint("TOPLEFT", parent, "TOPLEFT", positions[i], -10)
-        end
-    end
-    parent:SetScript("OnSizeChanged", LayoutColumns)
-    LayoutColumns()
-
-    for i, col in ipairs(columns) do col:Hide() end
-    for idx, info in pairs(slotData) do
-        local col = columns[idx]
-        if col and info and info.name and info.name ~= "" then
-            col:Show()
-            ForEachChild(col, function(child)
-                child:Hide()
-            end)
-            ForEachRegion(col, function(region)
-                region:Hide()
-            end)
-
-            local icon = col:CreateTexture(nil, "ARTWORK")
-            local scale = info.scale or 1
-            local baseW, baseH = 46, 48
-            local scale = info.scale or (idx == 2 and 1.25 or 1)
-            local width = (baseW * scale)
-            local height = (baseH * scale)
-            icon:SetSize(width, height)
-            local topOffset = (idx == 1 or idx == 3) and -28 or -5
-            icon:SetPoint("TOP", col, "TOP", 0, topOffset)
-            icon:SetTexture(medalTextures[idx] or "Interface\\Icons\\inv_misc_questionmark")
-            -- Ajuste para 184x192 (recorta menos)
-            icon:SetTexCoord(0.03, 0.97, 0.03, 0.97)
-
-            local nameFS = col:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            nameFS:SetPoint("TOP", icon, "BOTTOM", 0, -8)
-            nameFS:SetText(info.name or "")
-            nameFS:SetTextColor(GetClassColor(info.class))
-            SetAccentFont(nameFS, 14, "OUTLINE")
-
-            local countFS = col:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            countFS:SetPoint("TOP", nameFS, "BOTTOM", 0, -4)
-            countFS:SetText(string.format("%s items", info.count or 0))
-            countFS:SetTextColor(0.9, 0.9, 0.9)
-            SetAccentFont(countFS, 11)
-        end
-    end
-end
-
 local function BuildLootList(parent, items)
     local scroll = parent._lootScroll
     local child = parent._lootScrollChild
@@ -598,10 +445,21 @@ local function BuildLootList(parent, items)
         end
     end
 
+    local qualityCache = {}
+    local function CacheKey(info)
+        if info.itemID then return tostring(info.itemID) end
+        if info.link then return tostring(info.link) end
+        return nil
+    end
     local function GetQualityFromEntry(info)
         if not info then return nil end
+        local key = CacheKey(info)
+        if key and qualityCache[key] ~= nil then
+            return qualityCache[key]
+        end
         local quality = info.quality
         if quality ~= nil then
+            if key then qualityCache[key] = quality end
             return quality
         end
         quality = nil
@@ -626,6 +484,7 @@ local function BuildLootList(parent, items)
                 end
             end
         end
+        if key then qualityCache[key] = quality end
         return quality
     end
 
@@ -858,8 +717,6 @@ local function BuildStatsPanel(frame)
         end
     end
     local sessionItems = (addonTable.GetSessionItems and addonTable.GetSessionItems(sessionKey)) or nil
-    local sessionLB = (addonTable.GetSessionLeaderboard and addonTable.GetSessionLeaderboard(sessionKey)) or {}
-
     -- Right column header + dropdowns
     local raidTitle = colRight:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     raidTitle:SetPoint("TOPLEFT", colRight, "TOPLEFT", 0, 0)
@@ -927,60 +784,8 @@ local function BuildStatsPanel(frame)
         end)
     end)
 
-    -- Leaderboard (hidden in this build)
-    local leaderboard = CreateFrame("Frame", nil, colRight, "BackdropTemplate")
-    leaderboard:SetPoint("TOPLEFT", dropdownRow, "BOTTOMLEFT", 0, -1)
-    leaderboard:SetPoint("RIGHT", colRight, "RIGHT", 0, 0)
-    leaderboard:SetHeight(ENABLE_LEADERBOARD and 130 or 1)
-    local lbData = {}
-    if ENABLE_LEADERBOARD then
-        lbData = sessionLB or {}
-        if not lbData or #lbData == 0 then
-            local empty = leaderboard:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-            empty:SetPoint("CENTER", leaderboard, "CENTER", 0, 0)
-            empty:SetText(L["STATS_NO_SESSION_DATA"] or "Session data pending")
-            empty:SetTextColor(0.25, 0.25, 0.25)
-            SetAccentFont(empty, 12)
-        else
-            if #lbData > 3 then
-                while #lbData > 3 do table.remove(lbData, #lbData) end
-            elseif #lbData < 3 then
-                for i = #lbData + 1, 3 do
-                    lbData[i] = { name = "", class = nil, count = 0, scale = 0.6 }
-                end
-            end
-            pcall(BuildLeaderboard, leaderboard, lbData)
-        end
-        local announceBtn = CreateFrame("Button", nil, leaderboard)
-        announceBtn:SetSize(18, 18)
-        announceBtn:SetPoint("TOPRIGHT", leaderboard, "TOPRIGHT", -4, -4)
-        announceBtn:SetNormalTexture(TEX_SPEAKER)
-        announceBtn:SetHighlightTexture(TEX_SPEAKER)
-        announceBtn:SetAlpha(0.9)
-        announceBtn:SetScript("OnEnter", function(self)
-            if GameTooltip then
-                GameTooltip:SetOwner(self, "ANCHOR_TOPRIGHT")
-                GameTooltip:SetText(L["STATS_ANNOUNCE_GUILD_TOOLTIP"] or "Announce to guild")
-                GameTooltip:Show()
-            end
-        end)
-        announceBtn:SetScript("OnLeave", function()
-            if GameTooltip then GameTooltip:Hide() end
-        end)
-        announceBtn:SetScript("OnClick", function()
-            local session = addonTable.GetSessionByKey and addonTable.GetSessionByKey(sessionKey)
-            AnnounceSessionToGuild(session, lbData)
-        end)
-    else
-        leaderboard:Hide()
-    end
-
     local lootHeader = colRight:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    if ENABLE_LEADERBOARD then
-        lootHeader:SetPoint("TOP", leaderboard, "BOTTOM", 0, -10)
-    else
-        lootHeader:SetPoint("TOP", dropdownRow, "BOTTOM", 0, -10)
-    end
+    lootHeader:SetPoint("TOP", dropdownRow, "BOTTOM", 0, -10)
     lootHeader:SetText(L["STATS_LOOT_HISTORY"] or "Loot history")
     SetAccentFont(lootHeader, 12, "OUTLINE")
 
