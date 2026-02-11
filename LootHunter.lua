@@ -346,16 +346,38 @@ end
 function StatsStore:EnsureCurrentSession(allowStart)
     if allowStart == nil then allowStart = false end
     local inInstance, instanceType = IsInInstance()
-    if not inInstance or instanceType ~= "raid" then
+    local inRaidGroup = IsInRaid and IsInRaid() or false
+    if not inRaidGroup then
         self.currentSessionKey = nil
         return nil
     end
     local raidName, _, _, difficultyName, _, _, _, instanceID = GetInstanceInfo()
-    if not raidName then return nil end
     local db = self:EnsureSessionDB()
     if not db then return nil end
     local now = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
     local nowDay = (date and now and now > 0) and date("%Y-%m-%d", now) or nil
+    if not inInstance or instanceType ~= "raid" then
+        if self.currentSessionKey and db.sessions[self.currentSessionKey] then
+            local sess = db.sessions[self.currentSessionKey]
+            if sess and not sess.closedAt then
+                local lastEvent = sess.lastEventAt or sess.startedAt or 0
+                local lastDay = (nowDay and lastEvent and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
+                if nowDay and lastDay and lastDay ~= nowDay then
+                    sess.closedAt = now
+                    sess.closedReason = "new_day"
+                    self.currentSessionKey = nil
+                    return nil
+                end
+                sess.deaths = sess.deaths or {}
+                sess.revives = sess.revives or {}
+                sess.deadTime = sess.deadTime or {}
+                sess.deathStart = sess.deathStart or {}
+                return self.currentSessionKey, sess
+            end
+        end
+        return nil
+    end
+    if not raidName then return nil end
     if self.currentSessionKey and db.sessions[self.currentSessionKey] then
         local sess = db.sessions[self.currentSessionKey]
         if sess.closedAt then
@@ -444,34 +466,6 @@ function StatsStore:ResolveClassToken(name)
     return nil
 end
 
-function StatsStore:ItemIsCreatedBy(link)
-    if not link then return false end
-    local tooltip = self._createdByTooltip
-    if not tooltip then
-        tooltip = CreateFrame("GameTooltip", "LootHunterCreatedByTooltip", UIParent, "GameTooltipTemplate")
-        tooltip:SetOwner(UIParent, "ANCHOR_NONE")
-        self._createdByTooltip = tooltip
-    end
-    tooltip:ClearLines()
-    tooltip:SetHyperlink(link)
-    local pattern = self._createdByPattern
-    if not pattern then
-        local base = _G.ITEM_CREATED_BY or "Created by %s"
-        local esc = base:gsub("([%%%^%$%(%)%.%[%]%*%+%-%?])", "%%%1")
-        esc = esc:gsub("%%s", ".+")
-        pattern = esc
-        self._createdByPattern = pattern
-    end
-    for i = 2, tooltip:NumLines() do
-        local line = _G["LootHunterCreatedByTooltipTextLeft" .. i]
-        local text = line and line:GetText()
-        if text and text:match(pattern) then
-            return true
-        end
-    end
-    return false
-end
-
 function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, rollValue, wonViaRoll, boss, isBonusLoot)
     local key, session = self:EnsureCurrentSession(true)
     if not key or not session then return end
@@ -479,15 +473,6 @@ function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, ro
     if itemID and GetItemInfo then
         local _, _, quality = GetItemInfo(itemID)
         if quality ~= nil and quality <= 1 then
-            return
-        end
-    end
-    if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.stats and LootHunterDB.settings.stats.hideCreatedItems then
-        local scanLink = link
-        if not scanLink and itemID and GetItemInfo then
-            scanLink = select(2, GetItemInfo(itemID))
-        end
-        if scanLink and self:ItemIsCreatedBy(scanLink) then
             return
         end
     end
@@ -952,7 +937,6 @@ local function InitializeSettings()
         },
         stats = {
             maxSessions = 25,
-            hideCreatedItems = true,
         },
     }
     if not LootHunterDB.settings then
@@ -2192,30 +2176,20 @@ local function HandleInstanceChange(event)
         UpdateRaidChatFilter()
     end
     local inInstance, instanceType = IsInInstance()
-    local nowInRaid = inInstance and instanceType == "raid"
-    local stillInRaidGroup = IsInRaid and IsInRaid() or false
+    local nowInRaid = IsInRaid and IsInRaid() or false
     if nowInRaid and not lastInRaid then
         if StatsStore then
-            StatsStore.forceNewSession = true
-            StatsStore:EnsureCurrentSession(true)
+            local key, _ = StatsStore:EnsureCurrentSession(false)
+            if not key then
+                StatsStore.forceNewSession = true
+                StatsStore:EnsureCurrentSession(true)
+            end
         end
     end
-    if lastInRaid and (not nowInRaid or not stillInRaidGroup) then
-        if not pendingRaidExitCheck and C_Timer and C_Timer.After then
-            pendingRaidExitCheck = true
-            C_Timer.After(20, function()
-                pendingRaidExitCheck = false
-                local inInst2, instType2 = IsInInstance()
-                local nowInRaid2 = inInst2 and instType2 == "raid"
-                local stillInRaidGroup2 = IsInRaid and IsInRaid() or false
-                if (not nowInRaid2) or (not stillInRaidGroup2) then
-                    if StatsStore then
-                        StatsStore:CloseCurrentSession("left_instance_or_group")
-                        StatsStore.forceNewSession = true
-                    end
-                end
-                StatsStore:EnsureCurrentSession(false)
-            end)
+    if lastInRaid and not nowInRaid then
+        if StatsStore then
+            StatsStore:CloseCurrentSession("left_group_or_disband")
+            StatsStore.forceNewSession = true
         end
     end
     lastInRaid = nowInRaid

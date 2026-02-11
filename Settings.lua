@@ -1050,12 +1050,6 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         L["SETTING_STATS_MAX_SESSIONS_DESC"],
         function(v) return tostring(math.floor(v or 0)) end
     )
-    Settings:CreateCheckbox(
-        statsPanel,
-        "stats.hideCreatedItems",
-        L["SETTING_STATS_HIDE_CREATED_LABEL"],
-        L["SETTING_STATS_HIDE_CREATED_DESC"]
-    )
     -- Salto de línea después del slider
     if statsPanel._layout and statsPanel._layout[#statsPanel._layout] then
         statsPanel._layout[#statsPanel._layout].afterSpacing = 18

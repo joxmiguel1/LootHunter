@@ -2000,17 +2000,26 @@ function LootHunter_CreateGUI()
             return math.max(80, w - 10)
         end
         if #DebugLog == 0 then
+            local topPadding = 30
+            local emptyLog = logScrollChild:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+            emptyLog:SetPoint("TOPLEFT", logScrollChild, "TOPLEFT", 5, -topPadding)
+            emptyLog:SetPoint("RIGHT", logScrollChild, "RIGHT", -5, 0)
+            emptyLog:SetWidth(GetLogLineWidth())
+            emptyLog:SetJustifyH("CENTER")
+            emptyLog:SetWordWrap(true)
+            emptyLog:SetText(L["LOG_EMPTY_PANEL"])
+            ApplyAccentFont(emptyLog)
             local devNotice = logScrollChild:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            devNotice:SetPoint("TOPLEFT", logScrollChild, "TOPLEFT", 5, 0)
+            devNotice:SetPoint("TOPLEFT", emptyLog, "BOTTOMLEFT", 0, -6)
+            devNotice:SetPoint("RIGHT", logScrollChild, "RIGHT", -5, 0)
             devNotice:SetWidth(GetLogLineWidth())
-            devNotice:SetJustifyH("LEFT")
+            devNotice:SetJustifyH("CENTER")
             devNotice:SetWordWrap(true)
             devNotice:SetText(L["LOG_DEV_NOTICE"])
             devNotice:SetTextColor(1, 1, 1)
-            local emptyLog = logScrollChild:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-            emptyLog:SetPoint("TOPLEFT", devNotice, "BOTTOMLEFT", 0, -6)
-            emptyLog:SetText(L["LOG_EMPTY_PANEL"])
-            logScrollChild:SetHeight((devNotice:GetStringHeight() or 0) + 30)
+            ApplyAccentFont(devNotice)
+            local totalHeight = topPadding + (emptyLog:GetStringHeight() or 0) + (devNotice:GetStringHeight() or 0) + 20
+            logScrollChild:SetHeight(totalHeight)
         else
             local yOffset = 0
             local startIdx = math.max(1, #DebugLog - 1000)
