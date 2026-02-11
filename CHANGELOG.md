@@ -2,7 +2,6 @@ All notable changes to this project will be documented in this file.
 
 ## v1.1.5
 - Session tracking: start a new raid loot session on each raid entry; close stale sessions when the day changes.
-- Session log: optional filter to hide crafted ("Created by") items (default on).
 - Logs UI: added Export/Clear/Disable buttons and confirmation dialogs.
 - Logs display: fixed color prefix and improved log line layout.
 - Stats: leaderboard UI removed from active code and preserved in ambar
