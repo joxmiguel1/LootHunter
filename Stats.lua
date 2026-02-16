@@ -523,6 +523,7 @@ local function BuildLootList(parent, items)
         rollFS:SetWordWrap(false)
         rollFS:SetText("")
         SetAccentFont(rollFS, 10)
+        local rollType = info.rollType
 
         -- Loot source icon logic
         local iconTexture = TEX_BAG
@@ -531,9 +532,24 @@ local function BuildLootList(parent, items)
             iconTexture = TEX_BONUS
             texCoord = nil
         elseif info.roll then
-            iconTexture = "Interface\\Buttons\\UI-GroupLoot-Dice-Up"
+            if rollType == "greed" then
+                iconTexture = "Interface\\Buttons\\UI-GroupLoot-Coin-Up"
+            elseif rollType == "pass" then
+                iconTexture = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
+            else
+                iconTexture = "Interface\\Buttons\\UI-GroupLoot-Dice-Up"
+            end
             texCoord = nil
             rollFS:SetText(string.format("(%s)", info.roll or 0))
+        elseif rollType then
+            if rollType == "greed" then
+                iconTexture = "Interface\\Buttons\\UI-GroupLoot-Coin-Up"
+            elseif rollType == "pass" then
+                iconTexture = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
+            else
+                iconTexture = "Interface\\Buttons\\UI-GroupLoot-Dice-Up"
+            end
+            texCoord = nil
         else
             -- Direct drop; use equipped check icon
             iconTexture = TEX_EQUIPPED

@@ -32,6 +32,9 @@ addonTable.StatsStore = {
     MAX_SESSION_LOGS = 25,
     currentHistory = nil,
     currentSessionKey = nil,
+    lastClosedSessionKey = nil,
+    lastClosedSessionAt = nil,
+    LAST_SESSION_LOOT_GRACE_SECONDS = 45,
 }
 local StatsStore = addonTable.StatsStore
 local function NowSeconds()
@@ -346,8 +349,9 @@ end
 function StatsStore:EnsureCurrentSession(allowStart)
     if allowStart == nil then allowStart = false end
     local inInstance, instanceType = IsInInstance()
+    local inRaidInstance = inInstance and instanceType == "raid"
     local inRaidGroup = IsInRaid and IsInRaid() or false
-    if not inRaidGroup then
+    if not inRaidGroup and not inRaidInstance then
         self.currentSessionKey = nil
         return nil
     end
@@ -378,6 +382,14 @@ function StatsStore:EnsureCurrentSession(allowStart)
         return nil
     end
     if not raidName then return nil end
+    -- Check forceNewSession first, before trying to reuse an existing session
+    if self.forceNewSession then
+        self.forceNewSession = nil
+        if allowStart then
+            return self:StartSession(raidName, difficultyName, instanceID)
+        end
+        return nil
+    end
     if self.currentSessionKey and db.sessions[self.currentSessionKey] then
         local sess = db.sessions[self.currentSessionKey]
         if sess.closedAt then
@@ -407,13 +419,6 @@ function StatsStore:EnsureCurrentSession(allowStart)
             sess.deathStart = sess.deathStart or {}
             return self.currentSessionKey, sess
         end
-    end
-    if self.forceNewSession then
-        self.forceNewSession = nil
-        if allowStart then
-            return self:StartSession(raidName, difficultyName, instanceID)
-        end
-        return nil
     end
     local recent = self:GetMostRecentSession(raidName, instanceID)
     if recent then
@@ -466,8 +471,11 @@ function StatsStore:ResolveClassToken(name)
     return nil
 end
 
-function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, rollValue, wonViaRoll, boss, isBonusLoot)
-    local key, session = self:EnsureCurrentSession(true)
+function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, rollValue, wonViaRoll, boss, isBonusLoot, rollType)
+    local key, session = self:EnsureCurrentSession(false)
+    if not key or not session then
+        key, session = self:GetLateLootSessionFallback()
+    end
     if not key or not session then return end
     -- Skip poor/common-quality items (gray/white) in the session drop log.
     if itemID and GetItemInfo then
@@ -503,6 +511,7 @@ function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, ro
         player = playerName or UnitName("player"),
         class = classToken or self:ResolveClassToken(playerName),
         roll = rollValue,
+        rollType = rollType,
         wonViaRoll = wonViaRoll,
         time = now,
         boss = boss,
@@ -604,7 +613,32 @@ function StatsStore:CloseCurrentSession(reason)
     if not session then return end
     session.closedAt = NowSeconds()
     session.closedReason = reason or "left_instance"
+    self.lastClosedSessionKey = self.currentSessionKey
+    self.lastClosedSessionAt = session.closedAt
     self.currentSessionKey = nil
+end
+
+function StatsStore:GetLateLootSessionFallback()
+    local db = self:EnsureSessionDB()
+    if not db or not db.sessions then return nil, nil end
+    local key = self.lastClosedSessionKey
+    if not key then return nil, nil end
+    local session = db.sessions[key]
+    if not session then return nil, nil end
+    if not session.closedAt then return nil, nil end
+    local now = NowSeconds()
+    local grace = tonumber(self.LAST_SESSION_LOOT_GRACE_SECONDS) or 45
+    if grace < 1 then grace = 1 end
+    if (now - (self.lastClosedSessionAt or session.closedAt or now)) > grace then
+        return nil, nil
+    end
+    local nowDay = (date and now and now > 0) and date("%Y-%m-%d", now) or nil
+    local lastEvent = session.lastEventAt or session.startedAt or 0
+    local lastDay = (nowDay and lastEvent and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
+    if nowDay and lastDay and nowDay ~= lastDay then
+        return nil, nil
+    end
+    return key, session
 end
 
 function StatsStore:EndDeathTimer(name)
@@ -838,6 +872,7 @@ local lastAnnouncedRollTime = nil
 local lastPlayerRollItemID = nil
 local lastPlayerRollTime = nil
 local lastPlayerRollValue = nil
+local lastPlayerRollChoice = nil -- NEED, GREED, PASS, WON
 local ALERT_DEFAULT_DURATION = 6.8
 local ALERT_PRIORITY_PRIMARY = 1
 local ALERT_PRIORITY_SECONDARY = 2
@@ -1998,21 +2033,23 @@ end
 addonTable.ShowCoinReminderVisual = ShowCoinReminderVisual
 -- Manejadores de Boss Kill (ahora que ScheduleCoinReminder está definido)
 local function HandleBossKill(event, encounterID, bossName)
-    if not bossName or bossName == "" then return end
     LogCoinDebug(string.format("BOSS_KILL detected: %s (encounterID=%s)", bossName or "?", tostring(encounterID)))
     if StatsStore then
         StatsStore:EnsureCurrentSession(true)
     end
-    ScheduleCoinReminder(encounterID, bossName)
+    if bossName and bossName ~= "" then
+        ScheduleCoinReminder(encounterID, bossName)
+    end
 end
 local function HandleEncounterEnd(event, encounterID, bossName, _, endStatus)
     if endStatus == 1 then -- 1 significa éxito
-        if not bossName or bossName == "" then return end
         LogCoinDebug(string.format("ENCOUNTER_END success detected: %s (encounterID=%s)", bossName or "?", tostring(encounterID)))
         if StatsStore then
             StatsStore:EnsureCurrentSession(true)
         end
-        ScheduleCoinReminder(encounterID, bossName)
+        if bossName and bossName ~= "" then
+            ScheduleCoinReminder(encounterID, bossName)
+        end
     end
 end
 -- Patrones de loot multi-idioma basados en GlobalStrings
@@ -2136,8 +2173,76 @@ addonTable.ConsumeRecentRollForPlayer = addonTable.ConsumeRecentRollForPlayer or
     addonTable.RecentRolls[norm] = nil
     return rec.value
 end
+addonTable.RecentRollMeta = addonTable.RecentRollMeta or {}
+addonTable.ConsumeRecentRollMetaForPlayer = addonTable.ConsumeRecentRollMetaForPlayer or function(name, itemID)
+    if not name then return nil end
+    local norm = NormalizeUnitName(name)
+    local rec = addonTable.RecentRollMeta and addonTable.RecentRollMeta[norm]
+    if not rec or not rec.time then return nil end
+    local now = GetTime and GetTime() or 0
+    if (now - rec.time) > ROLL_TRACK_WINDOW then
+        addonTable.RecentRollMeta[norm] = nil
+        return nil
+    end
+    if itemID and rec.itemID and tonumber(rec.itemID) ~= tonumber(itemID) then
+        return nil
+    end
+    addonTable.RecentRollMeta[norm] = nil
+    return rec
+end
 local rollResultPattern = "^" .. (RANDOM_ROLL_RESULT or "%s rolls %d (%d-%d)"):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
 local rollFallbackPattern = "^(.-)%s+[Rr][Oo][Ll][Ll][Ss]%s+(%d+)%s+%((%d+)%-(%d+)%)"
+addonTable.BuildSystemRollChoicePatterns = addonTable.BuildSystemRollChoicePatterns or function()
+    local patterns = {}
+    local defs = {
+        { fmt = _G.LOOT_ROLL_NEED, choice = "need" },
+        { fmt = _G.LOOT_ROLL_NEED_SELF, choice = "need" },
+        { fmt = _G.LOOT_ROLL_GREED, choice = "greed" },
+        { fmt = _G.LOOT_ROLL_GREED_SELF, choice = "greed" },
+        { fmt = _G.LOOT_ROLL_PASSED, choice = "pass" },
+        { fmt = _G.LOOT_ROLL_PASSED_SELF, choice = "pass" },
+        { fmt = _G.LOOT_ROLL_WON, choice = "won", isWin = true },
+        { fmt = _G.LOOT_ROLL_WON_NO_SPAM_DE, choice = "won", isWin = true },
+        { fmt = _G.LOOT_ROLL_WON_NO_SPAM_GREED, choice = "greed", isWin = true },
+        { fmt = _G.LOOT_ROLL_WON_NO_SPAM_NEED, choice = "need", isWin = true },
+    }
+    for _, def in ipairs(defs) do
+        local fmt = NormalizeLootFormat(def.fmt)
+        if type(fmt) == "string" and fmt ~= "" then
+            local pattern = "^" .. fmt:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
+            table.insert(patterns, {
+                pattern = pattern,
+                choice = def.choice,
+                isWin = def.isWin or false,
+            })
+        end
+    end
+    return patterns
+end
+addonTable.SystemRollChoicePatterns = addonTable.SystemRollChoicePatterns or addonTable.BuildSystemRollChoicePatterns()
+addonTable.ExtractRollMetaFromCaptures = addonTable.ExtractRollMetaFromCaptures or function(...)
+    local n = select("#", ...)
+    if n < 1 then return nil end
+    local playerName, itemLink, rollValue
+    for i = 1, n do
+        local value = select(i, ...)
+        if type(value) == "string" then
+            if not itemLink and value:find("|Hitem:", 1, true) then
+                itemLink = value
+            elseif not playerName and not tonumber(value) then
+                playerName = value
+            end
+            if not rollValue then
+                local asNum = tonumber(value)
+                if asNum then
+                    rollValue = asNum
+                end
+            end
+        end
+    end
+    local itemID = itemLink and tonumber(itemLink:match("item:(%d+):")) or nil
+    return playerName, itemLink, itemID, rollValue
+end
 local function ShouldTriggerOtherWon(itemID)
     local now = GetTime and GetTime() or 0
     if suppressOtherWonUntil and now < suppressOtherWonUntil then
@@ -2179,11 +2284,8 @@ local function HandleInstanceChange(event)
     local nowInRaid = IsInRaid and IsInRaid() or false
     if nowInRaid and not lastInRaid then
         if StatsStore then
-            local key, _ = StatsStore:EnsureCurrentSession(false)
-            if not key then
-                StatsStore.forceNewSession = true
-                StatsStore:EnsureCurrentSession(true)
-            end
+            -- New raid group detected; the next boss kill starts a fresh session.
+            StatsStore.forceNewSession = true
         end
     end
     if lastInRaid and not nowInRaid then
@@ -2233,6 +2335,48 @@ end
 
 local function HandleChatSystem(event, msg, ...)
     if type(msg) ~= "string" then return end
+    if addonTable.SystemRollChoicePatterns and #addonTable.SystemRollChoicePatterns > 0 then
+        for _, entry in ipairs(addonTable.SystemRollChoicePatterns) do
+            local c1, c2, c3, c4 = msg:match(entry.pattern)
+            if c1 then
+                local playerName, itemLink, itemID, rollValue = addonTable.ExtractRollMetaFromCaptures(c1, c2, c3, c4)
+                if playerName then
+                    local normalized = NormalizeUnitName(playerName)
+                    local nowMeta = GetTime and GetTime() or 0
+                    if not itemID and lastAnnouncedRollItemID and lastAnnouncedRollTime
+                        and (nowMeta - lastAnnouncedRollTime) <= ROLL_TRACK_WINDOW then
+                        itemID = lastAnnouncedRollItemID
+                    end
+                    addonTable.RecentRollMeta[normalized] = {
+                        choice = entry.choice,
+                        isWin = entry.isWin and true or false,
+                        itemID = itemID,
+                        itemLink = itemLink,
+                        roll = rollValue,
+                        time = nowMeta,
+                    }
+                    -- Si es el roll del usuario, guardar el tipo también en lastPlayerRollChoice
+                    local playerCompare = UnitName("player")
+                    if playerCompare and NormalizeUnitName(playerCompare) == normalized then
+                        lastPlayerRollChoice = entry.choice
+                    end
+                    if rollValue then
+                        addonTable.RecentRolls[normalized] = { value = tonumber(rollValue), time = nowMeta }
+                    end
+                    if LogDebug then
+                        LogDebug(string.format("%s Roll meta detected: player=%s choice=%s win=%s item=%s roll=%s",
+                            FormatLogPrefix("Roll"),
+                            tostring(normalized),
+                            tostring(entry.choice),
+                            tostring(entry.isWin and true or false),
+                            tostring(itemID),
+                            tostring(rollValue)))
+                    end
+                end
+                break
+            end
+        end
+    end
     local name, rollVal = msg:match(rollResultPattern)
     if not name then
         name, rollVal = msg:match(rollFallbackPattern)
@@ -2245,6 +2389,12 @@ local function HandleChatSystem(event, msg, ...)
     local now = GetTime()
     if not (name == playerName or name == you or (youCaps and name == youCaps)) then
         addonTable.RecentRolls[normalized] = { value = tonumber(rollVal), time = now }
+        addonTable.RecentRollMeta[normalized] = addonTable.RecentRollMeta[normalized] or {}
+        addonTable.RecentRollMeta[normalized].roll = tonumber(rollVal)
+        addonTable.RecentRollMeta[normalized].time = now
+        if lastAnnouncedRollItemID then
+            addonTable.RecentRollMeta[normalized].itemID = lastAnnouncedRollItemID
+        end
         if LogDebug then
             LogDebug(string.format("%s Other roll detected: player=%s value=%s", FormatLogPrefix("Roll"), tostring(normalized), tostring(rollVal)))
         end
@@ -2264,6 +2414,63 @@ local function HandleChatSystem(event, msg, ...)
 end
 local function HandleChatLoot(event, msg, ...)
     if not CurrentCharDB or type(msg) ~= "string" then return end
+    
+    -- Variables de localización
+    local needStr = _G.LOOT_ROLL_NEED or "Need"
+    local greedStr = _G.LOOT_ROLL_GREED or "Greed"
+    local passStr = _G.LOOT_ROLL_PASS or "Pass"
+    
+    -- Detectar NEED/GREED/PASS del usuario ("You have selected...")
+    local rollChoice = nil
+    if msg:find("You have selected " .. needStr .. " for:", 1, true) or msg:find("You have selected Need for:", 1, true) then
+        rollChoice = "need"
+        lastPlayerRollChoice = "need"
+    elseif msg:find("You have selected " .. greedStr .. " for:", 1, true) or msg:find("You have selected Greed for:", 1, true) then
+        rollChoice = "greed"
+        lastPlayerRollChoice = "greed"
+    elseif msg:find("You have selected " .. passStr .. " for:", 1, true) or msg:find("You have selected Pass for:", 1, true) then
+        rollChoice = "pass"
+        lastPlayerRollChoice = "pass"
+    elseif msg:find("You won:", 1, true) then
+        -- "You won: [item]" - NO sobrescribir el rollChoice, mantener NEED/GREED/PASS original
+    end
+    
+    -- Detectar NEED/GREED/PASS de otros jugadores ("PlayerName has selected...")
+    -- Patrón: "PlayerName has selected Need for: [item]"
+    local otherPlayerName, otherPlayerChoice = nil, nil
+    if msg:find(" has selected " .. needStr .. " for:", 1, true) or msg:find(" has selected Need for:", 1, true) then
+        otherPlayerName = msg:match("^(.+) has selected " .. needStr .. " for:")
+        if not otherPlayerName then otherPlayerName = msg:match("^(.+) has selected Need for:") end
+        otherPlayerChoice = "need"
+    elseif msg:find(" has selected " .. greedStr .. " for:", 1, true) or msg:find(" has selected Greed for:", 1, true) then
+        otherPlayerName = msg:match("^(.+) has selected " .. greedStr .. " for:")
+        if not otherPlayerName then otherPlayerName = msg:match("^(.+) has selected Greed for:") end
+        otherPlayerChoice = "greed"
+    elseif msg:find(" has selected " .. passStr .. " for:", 1, true) or msg:find(" has selected Pass for:", 1, true) then
+        otherPlayerName = msg:match("^(.+) has selected " .. passStr .. " for:")
+        if not otherPlayerName then otherPlayerName = msg:match("^(.+) has selected Pass for:") end
+        otherPlayerChoice = "pass"
+    elseif msg:find(" won:", 1, true) then
+        -- "PlayerName won: [item]"
+        otherPlayerName = msg:match("^(.+) won:")
+        if otherPlayerName then
+            local normalized = NormalizeUnitName(otherPlayerName)
+            if normalized and addonTable.RecentRollMeta and addonTable.RecentRollMeta[normalized] then
+                -- Marcar que ganó, mantener su choice anterior (need/greed)
+            end
+        end
+    end
+    
+    -- Guardar el roll de otros jugadores en RecentRollMeta
+    if otherPlayerName and otherPlayerChoice then
+        local normalized = NormalizeUnitName(otherPlayerName)
+        if normalized then
+            addonTable.RecentRollMeta[normalized] = addonTable.RecentRollMeta[normalized] or {}
+            addonTable.RecentRollMeta[normalized].choice = otherPlayerChoice
+            addonTable.RecentRollMeta[normalized].time = GetTime and GetTime() or 0
+        end
+    end
+    
     if createdLootPatterns then
         for _, pattern in ipairs(createdLootPatterns) do
             if msg:match(pattern) then
@@ -2332,14 +2539,26 @@ local function HandleChatLoot(event, msg, ...)
     TriggerLootActivityTimerForItemID(id)
     -- Log de sesión para cualquier loot (tracked o no)
     local playerRollValue = isMine and GetRecentPlayerRollForItem(id) or nil
+    local otherRollMeta = nil
     if not isMine and playerName then
         playerRollValue = addonTable.ConsumeRecentRollForPlayer(playerName)
+        otherRollMeta = addonTable.ConsumeRecentRollMetaForPlayer(playerName, id)
+        if playerRollValue == nil and otherRollMeta and otherRollMeta.roll then
+            playerRollValue = tonumber(otherRollMeta.roll)
+        end
     end
     if not isMine and playerName and LogDebug then
         if playerRollValue ~= nil then
             LogDebug(string.format("%s Applied other roll to session: player=%s value=%s item=%s",
                 FormatLogPrefix("Roll"),
                 tostring(NormalizeUnitName(playerName)), tostring(playerRollValue), tostring(id)))
+        elseif otherRollMeta and (otherRollMeta.choice or otherRollMeta.isWin) then
+            LogDebug(string.format("%s Applied other roll-meta: player=%s choice=%s win=%s item=%s",
+                FormatLogPrefix("Roll"),
+                tostring(NormalizeUnitName(playerName)),
+                tostring(otherRollMeta.choice),
+                tostring(otherRollMeta.isWin and true or false),
+                tostring(id)))
         else
             LogDebug(string.format("%s No roll applied for other player=%s (dice icon will be check if no bonus).",
                 FormatLogPrefix("Roll"),
@@ -2348,10 +2567,27 @@ local function HandleChatLoot(event, msg, ...)
     end
     local skipSessionLog = tradeActive and isMine
     if not skipSessionLog then
-        if StatsStore then
-            StatsStore:EnsureCurrentSession(true)
+        -- Determinar rollType: para otros jugadores del otherRollMeta, para el usuario desde lastPlayerRollChoice o RecentRollMeta
+        local rollTypeForSession = nil
+        if not isMine and otherRollMeta and otherRollMeta.choice then
+            rollTypeForSession = otherRollMeta.choice
+        elseif isMine then
+            -- Para el usuario, intentar obtener el tipo de roll
+            if lastPlayerRollChoice and lastPlayerRollChoice ~= "pass" then
+                rollTypeForSession = lastPlayerRollChoice
+            else
+                -- Fallback: buscar en RecentRollMeta del usuario
+                local player = UnitName("player")
+                local playerNorm = player and NormalizeUnitName(player) or nil
+                if playerNorm and addonTable.RecentRollMeta and addonTable.RecentRollMeta[playerNorm] then
+                    local myMeta = addonTable.RecentRollMeta[playerNorm]
+                    if myMeta.choice and myMeta.choice ~= "pass" then
+                        rollTypeForSession = myMeta.choice
+                    end
+                end
+            end
         end
-        StatsStore:AddSessionLootEntry(id, itemLink, playerName or (isMine and UnitName("player")) or playerName, nil, playerRollValue, playerRollValue ~= nil, nil, lootViaBonusRoll)
+        StatsStore:AddSessionLootEntry(id, itemLink, playerName or (isMine and UnitName("player")) or playerName, nil, playerRollValue, playerRollValue ~= nil, nil, lootViaBonusRoll, rollTypeForSession)
     end
     if CurrentCharDB[id] then
         local itemData = CurrentCharDB[id]
@@ -2360,6 +2596,7 @@ local function HandleChatLoot(event, msg, ...)
                 lastPlayerRollItemID = nil
                 lastPlayerRollValue = nil
                 lastPlayerRollTime = nil
+                lastPlayerRollChoice = nil
             end
             if itemData.status ~= 2 then
                 itemData.status = 2
@@ -2387,6 +2624,10 @@ local function HandleChatLoot(event, msg, ...)
         else
             if itemData.status ~= 2 then
                 local viaRoll = ShouldTriggerOtherWon(id)
+                if not viaRoll and otherRollMeta then
+                    local hasChoice = (otherRollMeta.choice == "need" or otherRollMeta.choice == "greed" or otherRollMeta.choice == "won")
+                    viaRoll = (otherRollMeta.isWin == true) or hasChoice
+                end
                 local viaRecentDrop = not viaRoll and RecentlyDropped(id)
                 if viaRoll or viaRecentDrop then
                 itemData.status = 1
@@ -2475,13 +2716,15 @@ end
 
 local function HandleCombatLogEvent()
     if not CombatLogGetCurrentEventInfo then return end
-    local _, subEvent, _, _, _, _, _, _, destName, destFlags = CombatLogGetCurrentEventInfo()
+    local _, subEvent, _, sourceGUID, sourceName, sourceFlags, _, destGUID, destName, destFlags = CombatLogGetCurrentEventInfo()
     if not subEvent then return end
+    
     local function NormalizeSimple(name)
         if not name or name == "" then return nil end
         if Ambiguate then return Ambiguate(name, "short") end
         return name:match("^[^-]+") or name
     end
+    
     local function IsPlayerFlag(flags)
         if not flags then return false end
         local COMBATLOG_OBJECT_TYPE_PLAYER = _G.COMBATLOG_OBJECT_TYPE_PLAYER or 0x00000400
@@ -2491,6 +2734,27 @@ local function HandleCombatLogEvent()
         local band = (bit and bit.band) or (bit32 and bit32.band)
         return band and band(flags, COMBATLOG_OBJECT_TYPE_PLAYER) > 0
     end
+    
+    local function IsNPCFlag(flags)
+        if not flags then return false end
+        local COMBATLOG_OBJECT_TYPE_NPC = _G.COMBATLOG_OBJECT_TYPE_NPC or 0x00000800
+        if CombatLog_Object_IsA then
+            return CombatLog_Object_IsA(flags, COMBATLOG_OBJECT_TYPE_NPC)
+        end
+        local band = (bit and bit.band) or (bit32 and bit32.band)
+        return band and band(flags, COMBATLOG_OBJECT_TYPE_NPC) > 0
+    end
+    
+    local function IsBossFlag(flags)
+        if not flags then return false end
+        local COMBATLOG_OBJECT_REACTION_HOSTILE = _G.COMBATLOG_OBJECT_REACTION_HOSTILE or 2
+        if CombatLog_Object_IsA then
+            return CombatLog_Object_IsA(flags, COMBATLOG_OBJECT_REACTION_HOSTILE)
+        end
+        local band = (bit and bit.band) or (bit32 and bit32.band)
+        return band and band(flags, COMBATLOG_OBJECT_REACTION_HOSTILE) > 0
+    end
+    
     local function IsGroupMemberName(normName)
         if not normName or normName == "" then return false end
         if normName == NormalizeUnitName(UnitName("player")) then return true end
@@ -2513,10 +2777,22 @@ local function HandleCombatLogEvent()
         end
         return false
     end
+    
     local normDest = NormalizeSimple(destName)
     local isPlayerOrMember = normDest and (IsPlayerFlag(destFlags) or IsGroupMemberName(normDest))
-    if subEvent == "UNIT_DIED" and isPlayerOrMember then
-        StatsStore:AddDeath(normDest)
+    
+    if subEvent == "UNIT_DIED" then
+        if isPlayerOrMember then
+            StatsStore:AddDeath(normDest)
+        else
+            -- En raid, cualquier NPC que muera registra loot
+            local inRaid = IsInRaid and IsInRaid() or false
+            if inRaid and destName and destName ~= "" then
+                if StatsStore then
+                    StatsStore:EnsureCurrentSession(true)
+                end
+            end
+        end
     elseif subEvent == "SPELL_RESURRECT" and isPlayerOrMember then
         StatsStore:AddRevive(normDest)
     end
@@ -2831,19 +3107,23 @@ local function GetActiveQueueText()
 end
 
 local lastHeroicPrompt = 0
+addonTable.heroicQueueSearchLogged = addonTable.heroicQueueSearchLogged or false
 
 local function PromptHeroicQueueIfNeeded(force)
     if not (LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.misc and LootHunterDB.settings.misc.heroicQueueConfirm ~= false) then
         return
     end
     local text = GetActiveQueueText()
-    HeroicLog(string.format("Queue text=%s", tostring(text)))
     if not text or text == "" then
         lastHeroicConfirmedText = nil
+        addonTable.heroicQueueSearchLogged = false
         return
     end
+    if not addonTable.heroicQueueSearchLogged then
+        HeroicLog(string.format("Queue text=%s", tostring(text)))
+        addonTable.heroicQueueSearchLogged = true
+    end
     if text == lastHeroicConfirmedText then
-        HeroicLog("Skipping heroic popup: already confirmed for current queue")
         return
     end
     local lower = string.lower(text)
@@ -3630,3 +3910,4 @@ SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
     end
     StaticPopup_Show("LOOTHUNTER_WALL_CHANNEL")
 end
+
