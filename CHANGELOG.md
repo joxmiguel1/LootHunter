@@ -1,10 +1,13 @@
 All notable changes to this project will be documented in this file.
 
+
 ## v1.1.6
 - API: removed the previous favorites compatibility workaround.
 - Heroic queue debug logging: reduced queue update spam so the queue-text log is emitted once per queue start cycle.
 - Roll tracking: added chat-system parsing for `need/greed/pass/won` roll events (including no-spam variants) and linked them to player/item metadata.
 - Other-won detection: improved fallback logic to use roll metadata when numeric `/roll` values are missing, helping in groups without master looter.
+- Group tracking: Roll detection now works for all group members (not just the player); 
+- WoW Classic fix: NEED/GREED roll detection now works correctly; messages come via CHAT_MSG_LOOT instead of CHAT_MSG_SYSTEM.
 
 ## v1.1.5
 - Session tracking: start a new raid loot session on each raid entry; close stale sessions when the day changes.
