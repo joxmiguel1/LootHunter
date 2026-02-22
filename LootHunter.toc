@@ -4,14 +4,13 @@
 ## Notes-esES: Rastrea tu botín deseado y recibe alertas cuando aparece.
 ## Notes-esMX: Rastrea tu botín deseado y recibe alertas cuando aparece.
 ## Author: Xamael
-## Version: 1.1.6
+## Version: 1.2
 ## SavedVariables: LootHunterDB
 ## IconTexture: Interface\AddOns\LootHunter\Textures\icon_help.tga
 ## X-Curse-Project-ID: 1417341
 ## X-Wago-ID: 56n9xDN9
 ## X-Localizations: enUS, esES, esMX
-## X-CompatibleLocales: enUS, enGB, esES, esM
-
+## X-CompatibleLocales: enUS, enGB, esES, esMX
 
 ## Core libraries
 Libs\LibStub.lua
@@ -21,11 +20,28 @@ Libs\CallbackHandler-1.0.lua
 Libs\LibDataBroker-1.1.lua
 Libs\LibDBIcon-1.0.lua
 
+## Localización
 Localization.lua
-Settings.lua
+
+## Módulos de lógica
+Modules\Debug.lua
+Modules\Utils.lua
+Modules\StatsStore.lua
+Modules\SpecResolver.lua
+Modules\CoinReminder.lua
+Modules\LootParser.lua
+Modules\SessionTracker.lua
+Modules\MerchantHook.lua
+Modules\HeroicQueue.lua
+Modules\EncounterJournal.lua
+
+## Módulos de UI
 Minimap.lua
 Stats.lua
 UI.lua
-Modules/Debug.lua
+
+## Núcleo principal
 LootHunter.lua
+
+## Mini API pública
 API.lua
