@@ -3,7 +3,7 @@ local _, addonTable = ...
 local L = setmetatable({}, { __index = function(t, k) return k end })
 addonTable.L = L
 
--- Primary UI color (update here to re-theme accents across the addon).
+-- Primary UI color -
 addonTable.PRIMARY_COLOR = { hex = "77b52b" }
 
 local function HexToRGB(hex)

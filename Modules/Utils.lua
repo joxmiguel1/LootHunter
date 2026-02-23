@@ -1,7 +1,6 @@
 -- =============================================================
 -- Módulo: Utils.lua
 -- Funciones utilitarias compartidas entre todos los módulos.
--- Debe cargarse justo después de Debug.lua en el TOC.
 -- =============================================================
 local _, addonTable = ...
 

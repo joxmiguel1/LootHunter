@@ -224,7 +224,8 @@ function StatsStore:EnsureCurrentSession(allowStart)
             if sess and not sess.closedAt then
                 local lastEvent = sess.lastEventAt or sess.startedAt or 0
                 local lastDay   = (nowDay and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
-                if nowDay and lastDay and lastDay ~= nowDay then
+                -- Solo cerrar por cambio de día si NO estamos en un grupo de raid activo
+                if nowDay and lastDay and lastDay ~= nowDay and not inRaidGroup then
                     sess.closedAt    = now
                     sess.closedReason = "new_day"
                     self.currentSessionKey = nil
@@ -258,7 +259,8 @@ function StatsStore:EnsureCurrentSession(allowStart)
         else
             local lastEvent = sess.lastEventAt or sess.startedAt or 0
             local lastDay   = (nowDay and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
-            if nowDay and lastDay and lastDay ~= nowDay then
+            -- Solo cerrar por cambio de día si NO estamos en un grupo de raid activo
+            if nowDay and lastDay and lastDay ~= nowDay and not inRaidGroup then
                 sess.closedAt    = now
                 sess.closedReason = "new_day"
                 self.currentSessionKey = nil
@@ -289,7 +291,8 @@ function StatsStore:EnsureCurrentSession(allowStart)
     if recent then
         local lastEvent = recent.lastEventAt or recent.startedAt or 0
         local lastDay   = (nowDay and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
-        if nowDay and lastDay and lastDay ~= nowDay then
+        -- Solo cerrar por cambio de día si NO estamos en un grupo de raid activo
+        if nowDay and lastDay and lastDay ~= nowDay and not inRaidGroup then
             recent.closedAt    = now
             recent.closedReason = "new_day"
         else
