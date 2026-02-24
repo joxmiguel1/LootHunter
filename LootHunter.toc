@@ -38,6 +38,7 @@ Modules\EncounterJournal.lua
 ## Módulos de UI
 Minimap.lua
 Stats.lua
+Settings.lua
 UI.lua
 
 ## Núcleo principal
