@@ -12,15 +12,26 @@ local L               = addonTable.L
 
 -- Objeto principal con constantes configurables
 addonTable.StatsStore = {
-    MAX_HISTORY_EVENTS             = 200,
-    MAX_SESSION_LOGS               = 25,
-    currentHistory                 = nil,
-    currentSessionKey              = nil,
-    lastClosedSessionKey           = nil,
-    lastClosedSessionAt            = nil,
+    MAX_HISTORY_EVENTS              = 200,
+    MAX_SESSION_LOGS                = 25,
+    currentHistory                  = nil,
+    currentSessionKey               = nil,
+    lastClosedSessionKey            = nil,
+    lastClosedSessionAt             = nil,
     LAST_SESSION_LOOT_GRACE_SECONDS = 45,
+    -- El "día de raid" empieza a las 6:00 AM (21600 segundos)
+    -- Raids de 11pm a 2am quedan en el mismo día lógico
+    RAID_DAY_OFFSET_SECONDS         = 21600,
 }
 local StatsStore = addonTable.StatsStore
+
+-- Devuelve la fecha "lógica" de un timestamp.
+-- El día de raid empieza a las 6:00 AM, por lo que las horas
+-- entre medianoche y las 5:59 AM pertenecen al día anterior.
+local function LogicalDay(ts)
+    if not ts or ts <= 0 or not date then return nil end
+    return date("%Y-%m-%d", ts - StatsStore.RAID_DAY_OFFSET_SECONDS)
+end
 
 -- =============================================================
 -- HISTORIAL GLOBAL
@@ -215,7 +226,7 @@ function StatsStore:EnsureCurrentSession(allowStart)
     local db  = self:EnsureSessionDB()
     if not db then return nil end
     local now    = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
-    local nowDay = (date and now and now > 0) and date("%Y-%m-%d", now) or nil
+    local nowDay = LogicalDay(now)
 
     -- Fuera de instancia raid: mantener sesión del día si existe
     if not inInstance or instanceType ~= "raid" then
@@ -223,7 +234,7 @@ function StatsStore:EnsureCurrentSession(allowStart)
             local sess = db.sessions[self.currentSessionKey]
             if sess and not sess.closedAt then
                 local lastEvent = sess.lastEventAt or sess.startedAt or 0
-                local lastDay   = (nowDay and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
+                local lastDay   = LogicalDay(lastEvent)
                 -- Solo cerrar por cambio de día si NO estamos en un grupo de raid activo
                 if nowDay and lastDay and lastDay ~= nowDay and not inRaidGroup then
                     sess.closedAt    = now
@@ -258,16 +269,15 @@ function StatsStore:EnsureCurrentSession(allowStart)
             self.currentSessionKey = nil
         else
             local lastEvent = sess.lastEventAt or sess.startedAt or 0
-            local lastDay   = (nowDay and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
-            -- Solo cerrar por cambio de día si NO estamos en un grupo de raid activo
-            if nowDay and lastDay and lastDay ~= nowDay and not inRaidGroup then
-                sess.closedAt    = now
+            local lastDay   = LogicalDay(lastEvent)
+            if nowDay and lastDay and lastDay ~= nowDay then
+                sess.closedAt     = now
                 sess.closedReason = "new_day"
                 self.currentSessionKey = nil
             elseif sess.raidName == raidName and (not sess.instanceID or not instanceID or sess.instanceID == instanceID) then
-                sess.deaths    = sess.deaths    or {}
-                sess.revives   = sess.revives   or {}
-                sess.deadTime  = sess.deadTime  or {}
+                sess.deaths     = sess.deaths     or {}
+                sess.revives    = sess.revives    or {}
+                sess.deadTime   = sess.deadTime   or {}
                 sess.deathStart = sess.deathStart or {}
                 return self.currentSessionKey, sess
             end
@@ -290,16 +300,15 @@ function StatsStore:EnsureCurrentSession(allowStart)
     local recent = self:GetMostRecentSession(raidName, instanceID)
     if recent then
         local lastEvent = recent.lastEventAt or recent.startedAt or 0
-        local lastDay   = (nowDay and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
-        -- Solo cerrar por cambio de día si NO estamos en un grupo de raid activo
-        if nowDay and lastDay and lastDay ~= nowDay and not inRaidGroup then
-            recent.closedAt    = now
+        local lastDay   = LogicalDay(lastEvent)
+        if nowDay and lastDay and lastDay ~= nowDay then
+            recent.closedAt     = now
             recent.closedReason = "new_day"
         else
             self.currentSessionKey = recent.key
-            recent.deaths    = recent.deaths    or {}
-            recent.revives   = recent.revives   or {}
-            recent.deadTime  = recent.deadTime  or {}
+            recent.deaths     = recent.deaths     or {}
+            recent.revives    = recent.revives    or {}
+            recent.deadTime   = recent.deadTime   or {}
             recent.deathStart = recent.deathStart or {}
             return recent.key, recent
         end
@@ -337,9 +346,9 @@ function StatsStore:GetLateLootSessionFallback()
     local grace = tonumber(self.LAST_SESSION_LOOT_GRACE_SECONDS) or 45
     if grace < 1 then grace = 1 end
     if (now - (self.lastClosedSessionAt or session.closedAt or now)) > grace then return nil, nil end
-    local nowDay = (date and now > 0) and date("%Y-%m-%d", now) or nil
+    local nowDay    = LogicalDay(now)
     local lastEvent = session.lastEventAt or session.startedAt or 0
-    local lastDay   = (nowDay and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
+    local lastDay   = LogicalDay(lastEvent)
     if nowDay and lastDay and nowDay ~= lastDay then return nil, nil end
     return key, session
 end
@@ -432,7 +441,7 @@ end
 
 -- Agrega una entrada de loot a la sesión actual
 function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, rollValue, wonViaRoll, boss, isBonusLoot, rollType)
-    local key, session = self:EnsureCurrentSession(false)
+    local key, session = self:EnsureCurrentSession(true)
     if not key or not session then
         key, session = self:GetLateLootSessionFallback()
     end

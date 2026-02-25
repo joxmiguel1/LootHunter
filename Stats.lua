@@ -9,6 +9,39 @@ local TEX_EQUIPPED_FALLBACK = "Interface\\RaidFrame\\ReadyCheck-Ready"
 local TEX_BONUS = "Interface\\Icons\\inv_misc_elvencoins"
 local selectedSessionKey = nil
 local sessionMenuFrame, sessionMenuOverlay = nil, nil
+local copyPopupFrame = nil
+
+local function ShowCopyPopup(anchor, text)
+    if not text or text == "" then return end
+    if not copyPopupFrame then
+        local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+        f:SetSize(125, 30)
+        f:SetFrameStrata("TOOLTIP")
+        f:SetClampedToScreen(true)
+        f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+        f:SetBackdropColor(0.08, 0.08, 0.08, 0.95)
+        f:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+        local eb = CreateFrame("EditBox", nil, f)
+        eb:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -6)
+        eb:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -6, 6)
+        eb:SetFont(ACCENT_FONT, 11, "")
+        eb:SetAutoFocus(true)
+        eb:SetMultiLine(false)
+        eb:SetScript("OnEscapePressed", function(self) f:Hide() end)
+        eb:SetScript("OnEnterPressed", function(self) f:Hide() end)
+        eb:SetScript("OnEditFocusLost", function(self) f:Hide() end)
+        f._eb = eb
+        copyPopupFrame = f
+    end
+    copyPopupFrame._eb:SetText(text)
+    copyPopupFrame._eb:SetFocus()
+    copyPopupFrame._eb:HighlightText()
+    if anchor then
+        copyPopupFrame:ClearAllPoints()
+        copyPopupFrame:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 0, 4)
+    end
+    copyPopupFrame:Show()
+end
 
 local function ForEachChild(frame, fn)
     if not frame or not frame.GetChildren then return end
@@ -395,6 +428,9 @@ local function BuildLootList(parent, items)
         scroll:SetScript("OnSizeChanged", function(_, w)
             child:SetWidth(w or (parent:GetWidth() or 320))
         end)
+        scroll:HookScript("OnMouseWheel", function()
+            if copyPopupFrame then copyPopupFrame:Hide() end
+        end)
         parent._lootScroll = scroll
         parent._lootScrollChild = child
     end
@@ -565,9 +601,14 @@ local function BuildLootList(parent, items)
             diceIcon:SetTexCoord(0, 1, 0, 1)
         end
 
-        local playerFS = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        playerFS:SetPoint("LEFT", row, "RIGHT", -50, 0)
-        playerFS:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+        local playerBtn = CreateFrame("Button", nil, row)
+        playerBtn:SetPoint("LEFT", row, "RIGHT", -50, 0)
+        playerBtn:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+        playerBtn:SetHeight(rowHeight)
+        playerBtn:EnableMouse(true)
+
+        local playerFS = playerBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        playerFS:SetAllPoints(playerBtn)
         playerFS:SetJustifyH("LEFT")
         playerFS:SetWordWrap(false)
         playerFS:SetMaxLines(1)
@@ -575,6 +616,24 @@ local function BuildLootList(parent, items)
         local cr, cg, cb = getClassColor(info.class)
         playerFS:SetTextColor(cr, cg, cb)
         SetAccentFont(playerFS, 11)
+
+        playerBtn:SetScript("OnEnter", function(self)
+            if GameTooltip then
+                GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+                GameTooltip:ClearLines()
+                GameTooltip:AddLine(L["STATS_COPY_NAME"] or "Copy name", 1, 1, 1)
+                GameTooltip:Show()
+            end
+        end)
+        playerBtn:SetScript("OnLeave", function()
+            if GameTooltip then GameTooltip:Hide() end
+        end)
+        playerBtn:SetScript("OnClick", function(self)
+            local playerName = info.player or ""
+            if playerName ~= "" then
+                ShowCopyPopup(self, playerName)
+            end
+        end)
 
         row:SetScript("OnEnter", function()
             if info.link and GameTooltip then
@@ -819,6 +878,10 @@ end
 
 addonTable.BuildStatsPanelInto = function(frame)
     BuildStatsPanel(frame)
+end
+
+addonTable.HideCopyPopup = function()
+    if copyPopupFrame then copyPopupFrame:Hide() end
 end
 
 addonTable.AnnounceWallOfShame = function(channel, sessionKey)

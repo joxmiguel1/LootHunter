@@ -2233,6 +2233,7 @@ function LootHunter_CreateGUI()
 
     addonTable.SelectTab = function(id)
         CloseAllDropdowns()
+        if addonTable.HideCopyPopup then addonTable.HideCopyPopup() end
         panelList:Hide(); panelHelp:Hide(); panelConfig:Hide(); panelLog:Hide()
         if panelStats then panelStats:Hide() end
         tab1:Enable(); if tabStats then tabStats:Enable() end; tab3:Enable()

@@ -111,7 +111,7 @@ local function HandleCombatLogEvent()
             -- En raid: cualquier NPC muerto puede marcar el inicio de loot
             local inRaid = IsInRaid and IsInRaid() or false
             if inRaid and destName and destName ~= "" and StatsStore then
-                StatsStore:EnsureCurrentSession(true)
+                StatsStore:EnsureCurrentSession(false)
             end
         end
     elseif subEvent == "SPELL_RESURRECT" and isPlayerOrMember then
