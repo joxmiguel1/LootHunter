@@ -83,11 +83,6 @@ local function BuildOtherLootPatterns()
     return patterns
 end
 
--- Construye patrones que deben ser ignorados (loot que el addon ya crea)
-local function BuildCreatedLootPatterns()
-    return {}
-end
-
 -- Construye marcadores de texto de Bonus Roll en los mensajes de loot
 local function BuildBonusRollMarkers()
     local markers = {}
@@ -117,7 +112,7 @@ end
 -- Patrones construidos en tiempo de carga (GlobalStrings ya disponibles)
 local selfLootPatterns    = BuildSelfLootPatterns()
 local otherLootPatterns   = BuildOtherLootPatterns()
-local createdLootPatterns = BuildCreatedLootPatterns()
+local createdLootPatterns = {}
 local bonusRollMarkers    = BuildBonusRollMarkers()
 addonTable.SystemRollChoicePatterns = BuildSystemRollChoicePatterns()
 
@@ -171,12 +166,6 @@ local function ConsumeRecentRollMetaForPlayer(playerName, itemID)
 end
 addonTable.ConsumeRecentRollMetaForPlayer = ConsumeRecentRollMetaForPlayer
 
--- Extrae metadatos de roll desde capturas de un patrón de sistema
-local function ExtractRollMetaFromCaptures(captures, event, msg)
-    if not captures then return nil end
-    return captures
-end
-addonTable.ExtractRollMetaFromCaptures = ExtractRollMetaFromCaptures
 
 -- =============================================================
 -- HELPERS: ESTADO DE LOOT RECIENTE
@@ -219,43 +208,51 @@ local function ShouldTriggerOtherWon(itemID)
 end
 
 -- =============================================================
--- FILTRO DE CANALES DE RAID
+-- FILTRO DE CANALES GLOBALES EN RAID
+-- Silencia General / Comercio / Defensa / LFG mientras el jugador
+-- está dentro de un grupo de raid y el ajuste está habilitado.
 -- =============================================================
 
-local raidChatFilterActive = false
+local globalChatFilterActive = false
 
--- Devuelve si un nombre de canal debe ser silenciado por el filtro
-local function ShouldMuteChannelName(channelName)
-    if not raidChatFilterActive then return false end
-    if not channelName or channelName == "" then return false end
-    local lower = string.lower(channelName)
-    return lower:find("raid", 1, true) or lower:find("incursion", 1, true)
+
+-- Filtro aplicado a CHAT_MSG_CHANNEL.
+-- CHAT_MSG_CHANNEL solo recibe canales numerados públicos (General, Comercio,
+-- Defensa, LFG, etc.) — nunca raid, party, guild ni officer.
+-- Si el filtro está activo simplemente bloqueamos el mensaje.
+local function GlobalChatFilter(self, event, msg, sender, language,
+                                 channelString, target, flags, zoneID,
+                                 channelIndex, channelBaseName, ...)
+    return globalChatFilterActive
 end
 
--- Filtro de canal para mensajes de raid (aplicado cuando el jugador entra en raid)
-local function RaidChannelFilter(self, event, msg, ...)
-    if ShouldMuteChannelName(select(4, ...)) then return true end
-    return false
+-- Devuelve true solo si el jugador está físicamente dentro de una instancia de raid
+local function PlayerIsInRaid()
+    local inInstance, instanceType = IsInInstance()
+    return inInstance and instanceType == "raid"
 end
 
--- Actualiza el estado del filtro de chat de raid según la configuración
+-- Actualiza el estado del filtro según la configuración y el contexto actual.
+-- Se llama desde HandleInstanceChange (GROUP_ROSTER_UPDATE, PLAYER_ENTERING_WORLD,
+-- ZONE_CHANGED_NEW_AREA) y al cambiar el checkbox en Settings.
 local function UpdateRaidChatFilter()
-    local enabled = LootHunterDB
+    local settingEnabled = LootHunterDB
         and LootHunterDB.settings
-        and LootHunterDB.settings.lootAlerts
-        and LootHunterDB.settings.lootAlerts.muteRaidChat
-    raidChatFilterActive = enabled and true or false
+        and LootHunterDB.settings.misc
+        and LootHunterDB.settings.misc.muteRaidChannels
+    -- El filtro se activa solo si el ajuste está ON y el jugador está en raid
+    globalChatFilterActive = (settingEnabled and PlayerIsInRaid()) and true or false
     if ChatFrame_AddMessageEventFilter and ChatFrame_RemoveMessageEventFilter then
-        if raidChatFilterActive then
-            ChatFrame_AddMessageEventFilter("CHAT_MSG_RAID",        RaidChannelFilter)
-            ChatFrame_AddMessageEventFilter("CHAT_MSG_RAID_LEADER", RaidChannelFilter)
-        else
-            ChatFrame_RemoveMessageEventFilter("CHAT_MSG_RAID",        RaidChannelFilter)
-            ChatFrame_RemoveMessageEventFilter("CHAT_MSG_RAID_LEADER", RaidChannelFilter)
+        -- Siempre quitar primero para evitar registros duplicados
+        ChatFrame_RemoveMessageEventFilter("CHAT_MSG_CHANNEL", GlobalChatFilter)
+        if globalChatFilterActive then
+            ChatFrame_AddMessageEventFilter("CHAT_MSG_CHANNEL", GlobalChatFilter)
         end
     end
 end
 addonTable.UpdateRaidChatFilter = UpdateRaidChatFilter
+
+
 
 -- =============================================================
 -- IsScopeAllowed: controla si las alertas aplican en el contexto actual
@@ -274,8 +271,10 @@ addonTable.IsScopeAllowed = IsScopeAllowed
 
 -- Devuelve si la alerta de loot perdido debe mostrarse en el alcance configurado
 local function ShouldShowLostAlert()
-    if not LootHunterDB or not LootHunterDB.settings or not LootHunterDB.settings.lootAlerts then return false end
-    return IsScopeAllowed(LootHunterDB.settings.lootAlerts.lostAlertScope)
+    local db = LootHunterDB
+    if not db or not db.settings or not db.settings.lootAlerts then return false end
+    if not db.settings.lootAlerts.lostAlertEnabled then return false end
+    return IsScopeAllowed(db.settings.lootAlerts.lostAlertScope)
 end
 
 -- =============================================================

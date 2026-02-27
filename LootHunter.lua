@@ -98,12 +98,6 @@ end
 -- Exponer para que los módulos puedan encolar alertas
 addonTable._coreEnqueueAlert = EnqueueAlert
 
--- Buffer de drops recientes para no mostrar la misma alerta dos veces en <2s
-local LastDropAlert  = {}
-local dropBatchStart = 0
-local dropBatchCount = 0
-local suppressOtherWonUntil = 0
-
 -- Registra un mensaje en el log de alerta
 local function LogAlertDebug(msg)
     if addonTable.LogDebug then
