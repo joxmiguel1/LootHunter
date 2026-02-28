@@ -3,7 +3,7 @@ local _, addonTable = ...
 local L = setmetatable({}, { __index = function(t, k) return k end })
 addonTable.L = L
 
--- Primary UI color (update here to re-theme accents across the addon).
+-- Primary UI color -
 addonTable.PRIMARY_COLOR = { hex = "77b52b" }
 
 local function HexToRGB(hex)
@@ -98,6 +98,8 @@ L["MOUNT"] = "Mount"
 L["LOADED_MSG"] = "|cff00ff00[Loot Hunter] Loaded.|r Profile: |cff00ffff%s|r. Tracking: |cff00ff00%s|r items."
 L["ADDED_MSG"] = "|cff00ff00[Loot Hunter]|r Added %s - %s"
 L["UNKNOWN_SOURCE"] = "Unknown Source"
+L["STATS_DEFAULT_RAID_NAME"] = "Raid"
+L["STATS_UNKNOWN_PLAYER"]    = "Unknown"
 L["ZONE_DROP"] = "(Zone Drop)"
 L["LOADING"] = "Loading..."
 L["CONGRATS_CHAT_MSG"] = "|cff00ff00[Loot Hunter] Congrats! You received: %s|r"
@@ -173,6 +175,7 @@ L["STATS_LOOT_HISTORY"] = "Session drops"
 L["STATS_NO_SESSIONS"] = "No sessions yet"
 L["STATS_NO_SESSION_DATA"] = "Session data pending"
 L["STATS_NO_SESSION_LOOT"] = "No drops in this session"
+L["STATS_COPY_NAME"] = "Copy name"
 L["STATS_LOOT_LEGENDARY"] = "Legendary"
 L["STATS_LOOT_EPIC"] = "Epic"
 L["STATS_LOOT_RARE"] = "Rare"
@@ -361,6 +364,8 @@ local function ApplySpanish()
     L["LOADED_MSG"] = "|cff00ff00[Loot Hunter] Cargado.|r Perfil: |cff00ffff%s|r. Rastreando: |cff00ff00%s|r objetos."
     L["ADDED_MSG"] = "|cff00ff00[Loot Hunter]|r Agregado %s - %s"
     L["UNKNOWN_SOURCE"] = "Fuente desconocida"
+    L["STATS_DEFAULT_RAID_NAME"] = "Banda"
+    L["STATS_UNKNOWN_PLAYER"]    = "Desconocido"
     L["ZONE_DROP"] = "(Drop de zona)"
     L["LOADING"] = "Cargando..."
     L["CONGRATS_CHAT_MSG"] = "|cff00ff00[Loot Hunter] ¡Felicidades! Has conseguido: %s|r"
@@ -434,6 +439,7 @@ local function ApplySpanish()
     L["STATS_NO_SESSIONS"] = "Sin sesiones todavía"
     L["STATS_NO_SESSION_DATA"] = "Faltan datos de sesión"
     L["STATS_NO_SESSION_LOOT"] = "Sin drops en esta sesión"
+    L["STATS_COPY_NAME"] = "Copiar nombre"
     L["STATS_LOOT_LEGENDARY"] = "Legendario"
     L["STATS_LOOT_EPIC"] = "Épico"
     L["STATS_LOOT_RARE"] = "Raro"

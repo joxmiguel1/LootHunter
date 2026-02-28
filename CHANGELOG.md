@@ -1,6 +1,11 @@
 All notable changes to this project will be documented in this file.
 
 
+## v1.2
+- Code structure: refactored the monolithic `LootHunter.lua` core into dedicated modules under `Modules/` (`SessionTracker`, `StatsStore`, `LootParser`, `CoinReminder`, `Utils`, etc.) for better maintainability; eliminated duplicate helper functions and localized hardcoded strings.
+- Session tracking: raid sessions no longer close on a day change while the player is still in a raid group; the same session continues across midnight and only splits into a new record when leaving the group.
+- Stats (Session drops): clicking a player name now opens a small inline input with the name pre-selected for copying (Ctrl+C). The popup closes automatically on scroll, tab switch, focus loss, Enter, or Escape.
+
 ## v1.1.6
 - API: removed the previous favorites compatibility workaround.
 - Heroic queue debug logging: reduced queue update spam so the queue-text log is emitted once per queue start cycle.

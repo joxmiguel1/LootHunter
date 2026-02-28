@@ -1,974 +1,174 @@
 -- =============================================================
--- 1. VARIABLES Y TABLAS DE ORDEN
+-- LootHunter.lua — Núcleo del addon (archivo principal)
+-- Contiene: inicialización, sistema de alertas, AddItemToList,
+-- manejadores de eventos principales y slash commands.
+-- Los sistemas específicos están en Modules/*.lua
 -- =============================================================
 local addonName, addonTable = ...
-local L = addonTable.L
+local L             = addonTable.L
 local CreateGradient = addonTable.CreateGradient or function(text) return text end
-local ColorPrimary = addonTable.ColorPrimary
+
+-- Frame de eventos principal del addon
 local frame = CreateFrame("Frame")
 addonTable.isRefreshing = false
-local BuildStaticDB
-local ResolveAllUnknownSources
-local LogCoinDebug = addonTable.LogCoinDebug or function() end
-local LogDebug = addonTable.LogDebug or function() end
-local FormatLogPrefix = addonTable.FormatLogPrefix
-local GetCurrentSpecName
-local IsScopeAllowed
-local IsBonusRollWindowVisible
-local NormalizeTalentTabInfo
-local UpdateRaidChatFilter
-local MOPTierSelected = false
-local ShowDropAlert
-local SetupHeroicQueueConfirm
-local EnsureHeroicQueuePopup
-local ScheduleHeroicQueueCheck
-local lastHeroicPrompt = 0
-local heroPopupShown = false
-local lastHeroicConfirmedText = nil
-local lastHeroicConfirmedAt = 0
+
+-- Variables de debug cargadas desde Debug.lua (precedencia)
+local LogDebug      = addonTable.LogDebug      or function() end
+local FormatLogPrefix = addonTable.FormatLogPrefix or function(t) return "[" .. t .. "]" end
+local LogCoinDebug  = addonTable.LogCoinDebug   or function() end
+
+-- Referencia local al StatsStore definido en Modules/StatsStore.lua
+-- Se asigna después de ADDON_LOADED cuando los módulos ya cargaron
+local StatsStore = nil
+
+-- Clave del personaje actual (Nombre - Realm)
 local charKey = nil
-addonTable.StatsStore = {
-    MAX_HISTORY_EVENTS = 200,
-    MAX_SESSION_LOGS = 25,
-    currentHistory = nil,
-    currentSessionKey = nil,
-    lastClosedSessionKey = nil,
-    lastClosedSessionAt = nil,
-    LAST_SESSION_LOOT_GRACE_SECONDS = 45,
-}
-local StatsStore = addonTable.StatsStore
-local function NowSeconds()
-    if type(time) == "function" then
-        return time()
-    end
-    if GetTime then
-        return GetTime()
-    end
-    return 0
-end
-local function NormalizeUnitName(name)
-    if not name or name == "" then return name end
-    return name:match("^[^-]+") or name
-end
-addonTable.GetQualityFromLink = addonTable.GetQualityFromLink or function(link)
-    if type(link) ~= "string" or not _G.ITEM_QUALITY_COLORS then return nil end
-    local hex = link:match("|c(%x%x%x%x%x%x%x%x)")
-    if not hex then return nil end
-    hex = hex:lower()
-    for q, data in pairs(_G.ITEM_QUALITY_COLORS) do
-        if data and data.colorHex and data.colorHex:lower() == hex then
-            return q
-        end
-    end
-    return nil
-end
-local function SafeLeaveLFG()
-    if LeaveLFG then
-        local ok = pcall(LeaveLFG, _G.LE_LFG_CATEGORY_LFD or 1)
-        if ok then return end
-    end
-    if LFGLeave then
-        pcall(LFGLeave)
-    end
-end
-local function HeroicLog(msg)
-    if not LogDebug then return end
-    local t = GetTime and GetTime() or 0
-    LogDebug(string.format("%s[%0.2f] %s", FormatLogPrefix("HeroicQueue"), t, msg))
-end
-local currentRandomDungeonID = nil -- selección actual del dropdown/random
-local currentRandomDungeonName = nil -- texto visible del dropdown
-local function RequestItemData(itemID)
-    if C_Item and C_Item.RequestLoadItemDataByID then
-        C_Item.RequestLoadItemDataByID(itemID)
-    elseif C_Item and C_Item.RequestServerCache then
-        C_Item.RequestServerCache(itemID)
-    end
-    -- Forzar GetItemInfo para disparar la carga del cliente
-    GetItemInfo(itemID)
-end
-local ITEM_CLASS_WEAPON = _G.LE_ITEM_CLASS_WEAPON or 2
-local ITEM_CLASS_ARMOR = _G.LE_ITEM_CLASS_ARMOR or 4
-local ITEM_CLASS_MISC = _G.LE_ITEM_CLASS_MISCELLANEOUS or 15
-local ITEM_SUBCLASS_MOUNT = _G.LE_ITEM_MISCELLANEOUS_MOUNT or (_G.Enum and _G.Enum.ItemMiscellaneousSubclass and _G.Enum.ItemMiscellaneousSubclass.Mount) or 5
--- Variables para la base de datos del personaje actual
-local CurrentCharDB = nil 
-local refresh_timer = nil
-local tradeActive = false
--- Iconos de Raid
-local ICON_STAR = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:24|t"
-local ICON_DIAMOND = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_3:24|t"
-local ICON_TRIANGLE = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_4:24|t"
-addonTable.ICON_DIAMOND = ICON_DIAMOND
-addonTable.ICON_STAR = ICON_STAR
-local lastSpecName = nil
-local CLASS_FALLBACK_SPECS = {
-    [1] = { "Arms", "Fury", "Protection" }, -- GUERRERO
-    [2] = { "Holy", "Protection", "Retribution" }, -- PALADIN
-    [3] = { "Beast Mastery", "Marksmanship", "Survival" }, -- CAZADOR
-    [4] = { "Assassination", "Combat", "Subtlety" }, -- PICARO
-    [5] = { "Discipline", "Holy", "Shadow" }, -- SACERDOTE
-    [6] = { "Blood", "Frost", "Unholy" }, -- CABALLERO DE LA MUERTE
-    [7] = { "Elemental", "Enhancement", "Restoration" }, -- CHAMAN
-    [8] = { "Arcane", "Fire", "Frost" }, -- MAGO
-    [9] = { "Affliction", "Demonology", "Destruction" }, -- BRUJO
-    [10] = { "Brewmaster", "Mistweaver", "Windwalker" }, -- MONJE
-    [11] = { "Balance", "Feral", "Guardian", "Restoration" }, -- DRUIDA
-}
-local SPEC_ID_BY_CLASS = {
-    [1] = {
-        { id = 71, names = { "arms", "armas" } },
-        { id = 72, names = { "fury", "furia" } },
-        { id = 73, names = { "protection", "proteccion" } },
-    },
-    [2] = {
-        { id = 65, names = { "holy", "sagrado" } },
-        { id = 66, names = { "protection", "proteccion" } },
-        { id = 70, names = { "retribution", "reprension" } },
-    },
-    [3] = {
-        { id = 253, names = { "beast mastery", "bestias" } },
-        { id = 254, names = { "marksmanship", "punteria" } },
-        { id = 255, names = { "survival", "supervivencia" } },
-    },
-    [4] = {
-        { id = 259, names = { "assassination", "asesinato" } },
-        { id = 260, names = { "combat", "combate", "outlaw" } },
-        { id = 261, names = { "subtlety", "sutileza" } },
-    },
-    [5] = {
-        { id = 256, names = { "discipline", "disciplina" } },
-        { id = 257, names = { "holy", "sagrado" } },
-        { id = 258, names = { "shadow", "sombra" } },
-    },
-    [6] = {
-        { id = 250, names = { "blood", "sangre" } },
-        { id = 251, names = { "frost", "escarcha" } },
-        { id = 252, names = { "unholy", "profano" } },
-    },
-    [7] = {
-        { id = 262, names = { "elemental", "elemental" } },
-        { id = 263, names = { "enhancement", "mejora" } },
-        { id = 264, names = { "restoration", "restauracion" } },
-    },
-    [8] = {
-        { id = 62, names = { "arcane", "arcano" } },
-        { id = 63, names = { "fire", "fuego" } },
-        { id = 64, names = { "frost", "escarcha" } },
-    },
-    [9] = {
-        { id = 265, names = { "affliction", "afliccion" } },
-        { id = 266, names = { "demonology", "demonologia" } },
-        { id = 267, names = { "destruction", "destruccion" } },
-    },
-    [10] = {
-        { id = 268, names = { "brewmaster", "maestro cervecero" } },
-        { id = 270, names = { "mistweaver", "tejedor de niebla" } },
-        { id = 269, names = { "windwalker", "viajero del viento" } },
-    },
-    [11] = {
-        { id = 102, names = { "balance", "equilibrio" } },
-        { id = 103, names = { "feral", "feral" } },
-        { id = 104, names = { "guardian", "guardian" } },
-        { id = 105, names = { "restoration", "restauracion" } },
-    },
-}
-local SPEC_ID_BY_CLASS_NAME = {}
-local SPEC_NAME_BY_CLASS_ID = {}
-local specMapsBuilt = false
+-- Base de datos del personaje actual (referencia a LootHunterDB.Characters[charKey])
+local CurrentCharDB = nil
+local refresh_timer  = nil
+
+-- Constantes de clase de items (fallback para versiones que no tengan LE_ITEM_CLASS_*)
+local ITEM_CLASS_WEAPON   = _G.LE_ITEM_CLASS_WEAPON         or 2
+local ITEM_CLASS_ARMOR    = _G.LE_ITEM_CLASS_ARMOR           or 4
+local ITEM_CLASS_MISC     = _G.LE_ITEM_CLASS_MISCELLANEOUS   or 15
+local ITEM_SUBCLASS_MOUNT = _G.LE_ITEM_MISCELLANEOUS_MOUNT
+    or (_G.Enum and _G.Enum.ItemMiscellaneousSubclass and _G.Enum.ItemMiscellaneousSubclass.Mount)
+    or 5
+
+-- Iconos de marcadores de raid (también definidos en Utils.lua; esto es para compatibilidad
+-- con partes del código que los usan como locales antes de que Utils cargue en old-path)
+local ICON_STAR     = addonTable.ICON_STAR     or "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:24|t"
+local ICON_DIAMOND  = addonTable.ICON_DIAMOND  or "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_3:24|t"
 
 -- =============================================================
--- History and Session helpers (packed to reduce locals)
+-- SLOT_INFO: tabla de categorías de equipo con nombre localizado
 -- =============================================================
-function StatsStore:EnsureHistoryDB()
-    if not LootHunterDB or not charKey then return nil end
-    if not LootHunterDB.History then LootHunterDB.History = {} end
-    if not LootHunterDB.History[charKey] then
-        LootHunterDB.History[charKey] = {
-            events = {},
-            counters = {},
-            lastWinAt = nil,
-        }
-    end
-    local hist = LootHunterDB.History[charKey]
-    hist.events = hist.events or {}
-    hist.counters = hist.counters or {}
-    hist.counters.drops = hist.counters.drops or 0
-    hist.counters.wins = hist.counters.wins or 0
-    hist.counters.losses = hist.counters.losses or 0
-    hist.counters.coinReminders = hist.counters.coinReminders or 0
-    hist.counters.coinsUsed = hist.counters.coinsUsed or 0
-    hist.counters.bossNoLoot = hist.counters.bossNoLoot or 0
-    self.currentHistory = hist
-    return hist
-end
-
-function StatsStore:TrimHistory(hist)
-    if not hist or not hist.events then return end
-    while #hist.events > self.MAX_HISTORY_EVENTS do
-        table.remove(hist.events, 1)
-    end
-end
-
-function StatsStore:RecordHistoryEvent(kind, payload)
-    local hist = self:EnsureHistoryDB()
-    if not hist then return end
-    local now = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
-    local event = {
-        kind = kind,
-        time = now,
-        itemID = payload and payload.itemID or nil,
-        link = payload and payload.link or nil,
-        player = payload and payload.player or nil,
-        roll = payload and payload.roll or nil,
-        boss = payload and payload.boss or payload and payload.source or nil,
+local SLOT_INFO = {}
+local function RebuildSlotInfo()
+    SLOT_INFO = {
+        ["RAID_TOKEN"]            = { order = 0,  name = L["RAID_TOKEN"]   },
+        ["INVTYPE_HEAD"]          = { order = 1,  name = L["HEAD"]         },
+        ["INVTYPE_NECK"]          = { order = 2,  name = L["NECK"]         },
+        ["INVTYPE_SHOULDER"]      = { order = 3,  name = L["SHOULDER"]     },
+        ["INVTYPE_CLOAK"]         = { order = 4,  name = L["CLOAK"]        },
+        ["INVTYPE_CHEST"]         = { order = 5,  name = L["CHEST"]        },
+        ["INVTYPE_ROBE"]          = { order = 5,  name = L["CHEST"]        },
+        ["INVTYPE_WRIST"]         = { order = 6,  name = L["WRIST"]        },
+        ["INVTYPE_HAND"]          = { order = 7,  name = L["HAND"]         },
+        ["INVTYPE_WAIST"]         = { order = 8,  name = L["WAIST"]        },
+        ["INVTYPE_LEGS"]          = { order = 9,  name = L["LEGS"]         },
+        ["INVTYPE_FEET"]          = { order = 10, name = L["FEET"]         },
+        ["INVTYPE_FINGER"]        = { order = 11, name = L["FINGER"]       },
+        ["INVTYPE_TRINKET"]       = { order = 12, name = L["TRINKET"]      },
+        ["INVTYPE_WEAPON"]        = { order = 13, name = L["WEAPON_1H"]    },
+        ["INVTYPE_WEAPONMAINHAND"]= { order = 13, name = L["WEAPON_MAIN"]  },
+        ["INVTYPE_WEAPONOFFHAND"] = { order = 14, name = L["WEAPON_OFF"]   },
+        ["INVTYPE_SHIELD"]        = { order = 14, name = L["SHIELD"]       },
+        ["INVTYPE_HOLDABLE"]      = { order = 14, name = L["HOLDABLE"]     },
+        ["INVTYPE_2HWEAPON"]      = { order = 15, name = L["WEAPON_2H"]    },
+        ["INVTYPE_RANGED"]        = { order = 16, name = L["RANGED"]       },
+        ["INVTYPE_RANGEDRIGHT"]   = { order = 16, name = L["RANGED"]       },
+        ["INVTYPE_THROWN"]        = { order = 16, name = L["RANGED"]       },
+        ["INVTYPE_WAND"]          = { order = 16, name = L["RANGED"]       },
+        ["INVTYPE_RELIC"]         = { order = 16, name = L["RELIC"]        },
+        ["MOUNT"]                 = { order = 17, name = L["MOUNT"]        },
     }
-    hist.events[#hist.events + 1] = event
-    local counters = hist.counters
-    if kind == "drop" then
-        counters.drops = counters.drops + 1
-    elseif kind == "won" then
-        counters.wins = counters.wins + 1
-        hist.lastWinAt = now
-    elseif kind == "lost" then
-        counters.losses = counters.losses + 1
-    elseif kind == "coin_reminder" then
-        counters.coinReminders = counters.coinReminders + 1
-    elseif kind == "coin_used" then
-        counters.coinsUsed = counters.coinsUsed + 1
-    elseif kind == "boss_no_loot" then
-        counters.bossNoLoot = counters.bossNoLoot + 1
-    end
-    self:TrimHistory(hist)
+    addonTable.SLOT_INFO = SLOT_INFO
 end
+addonTable.RebuildSlotInfo = RebuildSlotInfo
+RebuildSlotInfo()  -- Primer build  con el idioma cargado en Localization.lua
 
-function StatsStore:GetHistoryStats()
-    local hist = self.currentHistory or self:EnsureHistoryDB()
-    local counters = hist and hist.counters or {}
-    return {
-        drops = counters.drops or 0,
-        wins = counters.wins or 0,
-        losses = counters.losses or 0,
-        coinReminders = counters.coinReminders or 0,
-        coinsUsed = counters.coinsUsed or 0,
-        bossNoLoot = counters.bossNoLoot or 0,
-        lastWinAt = hist and hist.lastWinAt or nil,
-    }
-end
-addonTable.GetHistoryStats = function() return StatsStore:GetHistoryStats() end
-
-function StatsStore:ResetAllStats()
-    if not LootHunterDB or not charKey then return false end
-    if LootHunterDB.Sessions then
-        LootHunterDB.Sessions[charKey] = { sessions = {}, counters = {} }
-    end
-    self.currentSessionKey = nil
-    self:EnsureSessionDB()
-    return true
-end
-addonTable.ResetAllStats = function() return StatsStore:ResetAllStats() end
-
-function StatsStore:ResetHistory()
-    if not LootHunterDB or not charKey then return false end
-    if LootHunterDB.History then
-        LootHunterDB.History[charKey] = {
-            events = {},
-            counters = {},
-            lastWinAt = nil,
-        }
-    end
-    self.currentHistory = nil
-    self:EnsureHistoryDB()
-    return true
-end
-addonTable.ResetHistory = function() return StatsStore:ResetHistory() end
-
-function StatsStore:EnsureSessionDB()
-    if not LootHunterDB or not charKey then return nil end
-    if not LootHunterDB.Sessions then LootHunterDB.Sessions = {} end
-    if not LootHunterDB.Sessions[charKey] then
-        LootHunterDB.Sessions[charKey] = { sessions = {}, counters = {} }
-    end
-    local db = LootHunterDB.Sessions[charKey]
-    db.sessions = db.sessions or {}
-    db.counters = db.counters or {}
-    return db
-end
-
-function StatsStore:BuildSessionLabel(raidName, sessionIndex, startedAt)
-    local dateStr = (type(date) == "function" and date("%m/%d/%Y", startedAt or time())) or tostring(startedAt or "")
-    return string.format("%s #%d - %s", raidName or "Raid", sessionIndex or 1, dateStr)
-end
-
-function StatsStore:GetMostRecentSession(raidName, instanceID)
-    local db = self:EnsureSessionDB()
-    if not db then return nil end
-    local best = nil
-    for _, session in pairs(db.sessions) do
-        if session and not session.closedAt then
-            if session.raidName == raidName then
-                if not instanceID or not session.instanceID or session.instanceID == instanceID then
-                    if not best or (session.startedAt or 0) > (best.startedAt or 0) then
-                        best = session
-                    end
-                end
-            end
-        end
-    end
-    return best
-end
-
-function StatsStore:StartSession(raidName, difficultyName, instanceID)
-    local db = self:EnsureSessionDB()
-    if not db then return nil end
-    raidName = raidName or "Raid"
-    db.counters[raidName] = (db.counters[raidName] or 0) + 1
-    local idx = db.counters[raidName]
-    local startedAt = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
-    local key = string.format("%s|%d|%s", raidName, idx, tostring(startedAt))
-    db.sessions[key] = {
-        key = key,
-        raidName = raidName,
-        difficulty = difficultyName,
-        instanceID = instanceID,
-        sessionIndex = idx,
-        startedAt = startedAt,
-        lastEventAt = startedAt,
-        items = {},
-        perPlayer = {},
-        deaths = {},
-        revives = {},
-        deadTime = {},
-        deathStart = {},
-        label = self:BuildSessionLabel(raidName, idx, startedAt),
-    }
-    self.currentSessionKey = key
-    return key, db.sessions[key]
-end
-
-function StatsStore:EnsureCurrentSession(allowStart)
-    if allowStart == nil then allowStart = false end
-    local inInstance, instanceType = IsInInstance()
-    local inRaidInstance = inInstance and instanceType == "raid"
-    local inRaidGroup = IsInRaid and IsInRaid() or false
-    if not inRaidGroup and not inRaidInstance then
-        self.currentSessionKey = nil
-        return nil
-    end
-    local raidName, _, _, difficultyName, _, _, _, instanceID = GetInstanceInfo()
-    local db = self:EnsureSessionDB()
-    if not db then return nil end
-    local now = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
-    local nowDay = (date and now and now > 0) and date("%Y-%m-%d", now) or nil
-    if not inInstance or instanceType ~= "raid" then
-        if self.currentSessionKey and db.sessions[self.currentSessionKey] then
-            local sess = db.sessions[self.currentSessionKey]
-            if sess and not sess.closedAt then
-                local lastEvent = sess.lastEventAt or sess.startedAt or 0
-                local lastDay = (nowDay and lastEvent and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
-                if nowDay and lastDay and lastDay ~= nowDay then
-                    sess.closedAt = now
-                    sess.closedReason = "new_day"
-                    self.currentSessionKey = nil
-                    return nil
-                end
-                sess.deaths = sess.deaths or {}
-                sess.revives = sess.revives or {}
-                sess.deadTime = sess.deadTime or {}
-                sess.deathStart = sess.deathStart or {}
-                return self.currentSessionKey, sess
-            end
-        end
-        return nil
-    end
-    if not raidName then return nil end
-    -- Check forceNewSession first, before trying to reuse an existing session
-    if self.forceNewSession then
-        self.forceNewSession = nil
-        if allowStart then
-            return self:StartSession(raidName, difficultyName, instanceID)
-        end
-        return nil
-    end
-    if self.currentSessionKey and db.sessions[self.currentSessionKey] then
-        local sess = db.sessions[self.currentSessionKey]
-        if sess.closedAt then
-            self.currentSessionKey = nil
-        else
-            local lastEvent = sess.lastEventAt or sess.startedAt or 0
-            local lastDay = (nowDay and lastEvent and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
-            if nowDay and lastDay and lastDay ~= nowDay then
-                sess.closedAt = now
-                sess.closedReason = "new_day"
-                self.currentSessionKey = nil
-            elseif sess.raidName == raidName and (not sess.instanceID or not instanceID or sess.instanceID == instanceID) then
-                sess.deaths = sess.deaths or {}
-                sess.revives = sess.revives or {}
-                sess.deadTime = sess.deadTime or {}
-                sess.deathStart = sess.deathStart or {}
-                return self.currentSessionKey, sess
-            end
-        end
-    end
-    if self.currentSessionKey and db.sessions[self.currentSessionKey] then
-        local sess = db.sessions[self.currentSessionKey]
-        if sess.raidName == raidName and (not sess.instanceID or not instanceID or sess.instanceID == instanceID) then
-            sess.deaths = sess.deaths or {}
-            sess.revives = sess.revives or {}
-            sess.deadTime = sess.deadTime or {}
-            sess.deathStart = sess.deathStart or {}
-            return self.currentSessionKey, sess
-        end
-    end
-    local recent = self:GetMostRecentSession(raidName, instanceID)
-    if recent then
-        local lastEvent = recent.lastEventAt or recent.startedAt or 0
-        local lastDay = (nowDay and lastEvent and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
-        if nowDay and lastDay and lastDay ~= nowDay then
-            recent.closedAt = now
-            recent.closedReason = "new_day"
-        else
-            self.currentSessionKey = recent.key
-            recent.deaths = recent.deaths or {}
-            recent.revives = recent.revives or {}
-            recent.deadTime = recent.deadTime or {}
-            recent.deathStart = recent.deathStart or {}
-            return recent.key, recent
-        end
-    end
-    if allowStart then
-        return self:StartSession(raidName, difficultyName, instanceID)
-    end
-    return nil
-end
-
-function StatsStore:ResolveClassToken(name)
-    if not name or name == "" then return nil end
-    local base = name:match("^[^-]+") or name
-    if IsInRaid() then
-        for i = 1, GetNumGroupMembers() do
-            local unit = "raid" .. i
-            local unitName = UnitName(unit)
-            if unitName == base then
-                local _, classToken = UnitClass(unit)
-                return classToken
-            end
-        end
-    elseif IsInGroup() then
-        for i = 1, GetNumSubgroupMembers() do
-            local unit = "party" .. i
-            local unitName = UnitName(unit)
-            if unitName == base then
-                local _, classToken = UnitClass(unit)
-                return classToken
-            end
-        end
-    end
-    if base == UnitName("player") then
-        local _, classToken = UnitClass("player")
-        return classToken
-    end
-    return nil
-end
-
-function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, rollValue, wonViaRoll, boss, isBonusLoot, rollType)
-    local key, session = self:EnsureCurrentSession(false)
-    if not key or not session then
-        key, session = self:GetLateLootSessionFallback()
-    end
-    if not key or not session then return end
-    -- Skip poor/common-quality items (gray/white) in the session drop log.
-    if itemID and GetItemInfo then
-        local _, _, quality = GetItemInfo(itemID)
-        if quality ~= nil and quality <= 1 then
-            return
-        end
-    end
-    local icon = nil
-    if itemID then
-        icon = select(10, GetItemInfo(itemID))
-    end
-    local quality = nil
-    if itemID and C_Item and C_Item.GetItemQualityByID then
-        quality = C_Item.GetItemQualityByID(itemID)
-    end
-    if not quality and GetItemInfo then
-        if itemID then
-            quality = select(3, GetItemInfo(itemID))
-        elseif link then
-            quality = select(3, GetItemInfo(link))
-        end
-    end
-    if not quality and link then
-        quality = addonTable.GetQualityFromLink and addonTable.GetQualityFromLink(link) or nil
-    end
-    local now = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
-    local entry = {
-        itemID = itemID,
-        link = link,
-        icon = icon,
-        quality = quality,
-        player = playerName or UnitName("player"),
-        class = classToken or self:ResolveClassToken(playerName),
-        roll = rollValue,
-        rollType = rollType,
-        wonViaRoll = wonViaRoll,
-        time = now,
-        boss = boss,
-        bonus = isBonusLoot or false,
-        destroyed = false,
-    }
-    session.items[#session.items + 1] = entry
-    session.lastEventAt = now
-    local perPlayer = session.perPlayer
-    local playerKey = entry.player or "Unknown"
-    if not perPlayer[playerKey] then
-        perPlayer[playerKey] = { count = 0, class = entry.class }
-    end
-    perPlayer[playerKey].count = perPlayer[playerKey].count + 1
-    if entry.class and not perPlayer[playerKey].class then
-        perPlayer[playerKey].class = entry.class
-    end
-    local db = self:EnsureSessionDB()
-    if db then
-        local keys = {}
-        for k in pairs(db.sessions) do keys[#keys + 1] = k end
-        table.sort(keys, function(a, b)
-            local sa = db.sessions[a] and db.sessions[a].startedAt or 0
-            local sb = db.sessions[b] and db.sessions[b].startedAt or 0
-            return sa > sb
-        end)
-        local limit = tonumber(self.MAX_SESSION_LOGS) or 20
-        if limit < 1 then limit = 1 end
-        if #keys > limit then
-            for i = limit + 1, #keys do
-                db.sessions[keys[i]] = nil
-            end
-        end
-    end
-end
-
-function StatsStore:GetSessionList()
-    local db = self:EnsureSessionDB()
-    if not db then return {} end
-    local items = {}
-    for key, session in pairs(db.sessions) do
-        items[#items + 1] = {
-            key = key,
-            label = session.label or self:BuildSessionLabel(session.raidName, session.sessionIndex, session.startedAt),
-            raidName = session.raidName,
-            startedAt = session.startedAt or 0,
-            difficulty = session.difficulty,
-            sessionIndex = session.sessionIndex or 1,
-        }
-    end
-    table.sort(items, function(a, b) return (a.startedAt or 0) > (b.startedAt or 0) end)
-    return items
-end
-
-function StatsStore:GetSessionByKey(key)
-    local db = self:EnsureSessionDB()
-    if not db then return nil end
-    return db.sessions[key]
-end
-
-function StatsStore:AddDeath(name)
-    local _, session = self:EnsureCurrentSession(false)
-    if not session and self.currentSessionKey then
-        local db = self:EnsureSessionDB()
-        if db and db.sessions then
-            session = db.sessions[self.currentSessionKey]
-        end
-    end
-    if not session then return end
-    name = name or "Unknown"
-    session.deaths = session.deaths or {}
-    session.deathStart = session.deathStart or {}
-    session.deaths[name] = (session.deaths[name] or 0) + 1
-    if not session.deathStart[name] then
-        session.deathStart[name] = NowSeconds()
-    end
-end
-
-function StatsStore:AddRevive(name)
-    name = name or "Unknown"
-    local _, session = self:EnsureCurrentSession(false)
-    if not session and self.currentSessionKey then
-        local db = self:EnsureSessionDB()
-        if db and db.sessions then
-            session = db.sessions[self.currentSessionKey]
-        end
-    end
-    if not session then return end
-    session.revives = session.revives or {}
-    session.revives[name] = (session.revives[name] or 0) + 1
-    self:EndDeathTimer(name)
-end
-
-function StatsStore:CloseCurrentSession(reason)
-    if not self.currentSessionKey then return end
-    local db = self:EnsureSessionDB()
-    if not db or not db.sessions then return end
-    local session = db.sessions[self.currentSessionKey]
-    if not session then return end
-    session.closedAt = NowSeconds()
-    session.closedReason = reason or "left_instance"
-    self.lastClosedSessionKey = self.currentSessionKey
-    self.lastClosedSessionAt = session.closedAt
-    self.currentSessionKey = nil
-end
-
-function StatsStore:GetLateLootSessionFallback()
-    local db = self:EnsureSessionDB()
-    if not db or not db.sessions then return nil, nil end
-    local key = self.lastClosedSessionKey
-    if not key then return nil, nil end
-    local session = db.sessions[key]
-    if not session then return nil, nil end
-    if not session.closedAt then return nil, nil end
-    local now = NowSeconds()
-    local grace = tonumber(self.LAST_SESSION_LOOT_GRACE_SECONDS) or 45
-    if grace < 1 then grace = 1 end
-    if (now - (self.lastClosedSessionAt or session.closedAt or now)) > grace then
-        return nil, nil
-    end
-    local nowDay = (date and now and now > 0) and date("%Y-%m-%d", now) or nil
-    local lastEvent = session.lastEventAt or session.startedAt or 0
-    local lastDay = (nowDay and lastEvent and lastEvent > 0 and date) and date("%Y-%m-%d", lastEvent) or nil
-    if nowDay and lastDay and nowDay ~= lastDay then
-        return nil, nil
-    end
-    return key, session
-end
-
-function StatsStore:EndDeathTimer(name)
-    local _, session = self:EnsureCurrentSession(false)
-    if not session and self.currentSessionKey then
-        local db = self:EnsureSessionDB()
-        if db and db.sessions then
-            session = db.sessions[self.currentSessionKey]
-        end
-    end
-    if not session then return end
-    name = name or "Unknown"
-    session.deathStart = session.deathStart or {}
-    session.deadTime = session.deadTime or {}
-    local startedAt = session.deathStart[name]
-    if startedAt then
-        local delta = math.max(0, NowSeconds() - startedAt)
-        session.deadTime[name] = (session.deadTime[name] or 0) + delta
-        session.deathStart[name] = nil
-    end
-end
-
-function StatsStore:GetLatestSessionKey()
-    local list = self:GetSessionList()
-    return list[1] and list[1].key or nil
-end
-
-function StatsStore:GetSessionLeaderboard(key)
-    local session = self:GetSessionByKey(key or self.currentSessionKey)
-    if not session then return {} end
-    local counts = {}
-    for _, entry in ipairs(session.items or {}) do
-        local p = entry.player or "Unknown"
-        if not counts[p] then counts[p] = { count = 0, class = entry.class } end
-        counts[p].count = counts[p].count + 1
-        if entry.class and not counts[p].class then counts[p].class = entry.class end
-    end
-    local out = {}
-    for name, data in pairs(counts) do
-        out[#out + 1] = { name = name, count = data.count or 0, class = data.class }
-    end
-    table.sort(out, function(a, b)
-        if (a.count or 0) == (b.count or 0) then
-            return (a.name or "") < (b.name or "")
-        end
-        return (a.count or 0) > (b.count or 0)
-    end)
-    return out
-end
-
-function StatsStore:GetSessionItems(key)
-    local session = self:GetSessionByKey(key or self.currentSessionKey)
-    if not session then return {} end
-    return session.items or {}
-end
-
-addonTable.GetSessionList = function() return StatsStore:GetSessionList() end
-addonTable.GetSessionItems = function(key) return StatsStore:GetSessionItems(key) end
-addonTable.GetSessionLeaderboard = function(key) return StatsStore:GetSessionLeaderboard(key) end
-addonTable.GetLatestSessionKey = function() return StatsStore:GetLatestSessionKey() end
-addonTable.GetSessionByKey = function(key) return StatsStore:GetSessionByKey(key) end
-addonTable.GetCurrentSessionKey = function() return StatsStore.currentSessionKey end
-
-local function GetAddonLanguage()
-    local db = LootHunterDB or addonTable.db
-    local lang = db and db.settings and db.settings.general and db.settings.general.language
-    if type(lang) == "string" then
-        lang = string.upper(lang)
-    end
-    if lang == "EN" or lang == "ES" then
-        return lang
-    end
-    return "AUTO"
-end
-
-local function TitleCaseSpecName(name)
-    if not name or name == "" then return name end
-    return (name:gsub("(%S)(%S*)", function(first, rest)
-        return string.upper(first) .. string.lower(rest)
-    end))
-end
-
-local function GetStaticSpecName(specID, lang)
-    local _, _, classID = UnitClass("player")
-    local specs = classID and SPEC_ID_BY_CLASS[classID]
-    if not specs then return nil end
-    local index = (lang == "ES") and 2 or 1
-    for _, spec in ipairs(specs) do
-        if spec.id == specID then
-            local name = spec.names[index] or spec.names[1]
-            if name and name ~= "" then
-                return TitleCaseSpecName(name)
-            end
-        end
-    end
-    return nil
-end
-
-local function NormalizeSpecKey(name)
-    if type(name) ~= "string" then return "" end
-    local key = string.lower(name)
-    key = key:gsub("[áàäâã]", "a")
-    key = key:gsub("[éèëê]", "e")
-    key = key:gsub("[íìïî]", "i")
-    key = key:gsub("[óòöôõ]", "o")
-    key = key:gsub("[úùüû]", "u")
-    key = key:gsub("ñ", "n")
-    key = key:gsub("%s+", " ")
-    key = key:gsub("^%s+", ""):gsub("%s+$", "")
-    return key
-end
-
-local function BuildStaticSpecMaps()
-    for classID, specs in pairs(SPEC_ID_BY_CLASS) do
-        SPEC_ID_BY_CLASS_NAME[classID] = SPEC_ID_BY_CLASS_NAME[classID] or {}
-        SPEC_NAME_BY_CLASS_ID[classID] = SPEC_NAME_BY_CLASS_ID[classID] or {}
-        for _, spec in ipairs(specs) do
-            SPEC_NAME_BY_CLASS_ID[classID][spec.id] = SPEC_NAME_BY_CLASS_ID[classID][spec.id] or spec.names[1]
-            for _, name in ipairs(spec.names) do
-                SPEC_ID_BY_CLASS_NAME[classID][NormalizeSpecKey(name)] = spec.id
-            end
-        end
-    end
-end
-
-local function ExtendSpecMapsWithAPI()
-    local _, _, classID = UnitClass("player")
-    if not classID then return end
-    SPEC_ID_BY_CLASS_NAME[classID] = SPEC_ID_BY_CLASS_NAME[classID] or {}
-    SPEC_NAME_BY_CLASS_ID[classID] = SPEC_NAME_BY_CLASS_ID[classID] or {}
-    if GetNumSpecializationsForClassID and GetSpecializationInfoForClassID then
-        local okNum, num = pcall(GetNumSpecializationsForClassID, classID)
-        if okNum and num and num > 0 then
-            for i = 1, num do
-                local specID, name = GetSpecializationInfoForClassID(classID, i)
-                if specID and name and name ~= "" then
-                    SPEC_ID_BY_CLASS_NAME[classID][NormalizeSpecKey(name)] = specID
-                    SPEC_NAME_BY_CLASS_ID[classID][specID] = name
-                end
-            end
-        end
-    end
-    if GetNumSpecializations and GetSpecializationInfo then
-        local okNum, num = pcall(GetNumSpecializations)
-        if okNum and num and num > 0 then
-            for i = 1, num do
-                local specID, name = GetSpecializationInfo(i)
-                if specID and name and name ~= "" then
-                    SPEC_ID_BY_CLASS_NAME[classID][NormalizeSpecKey(name)] = specID
-                    SPEC_NAME_BY_CLASS_ID[classID][specID] = name
-                end
-            end
-        end
-    end
-    if GetNumTalentTabs and GetTalentTabInfo then
-        local okNum, numTabs = pcall(GetNumTalentTabs)
-        if okNum and numTabs and numTabs > 0 then
-            local group = (type(GetActiveTalentGroup) == "function" and GetActiveTalentGroup()) or 1
-            for tab = 1, numTabs do
-                local name = NormalizeTalentTabInfo(tab, group)
-                if name and name ~= "" then
-                    local fallback = SPEC_ID_BY_CLASS[classID] and SPEC_ID_BY_CLASS[classID][tab]
-                    if fallback and fallback.id then
-                        SPEC_ID_BY_CLASS_NAME[classID][NormalizeSpecKey(name)] = fallback.id
-                        SPEC_NAME_BY_CLASS_ID[classID][fallback.id] = name
-                    end
-                end
-            end
-        end
-    end
-end
-
-local function BuildSpecMaps()
-    if specMapsBuilt then return end
-    specMapsBuilt = true
-    BuildStaticSpecMaps()
-    ExtendSpecMapsWithAPI()
-end
-
-local function GetSpecIDFromName(specName)
-    if not specName or specName == "" then return nil end
-    BuildSpecMaps()
-    local _, _, classID = UnitClass("player")
-    local key = NormalizeSpecKey(specName)
-    return classID and SPEC_ID_BY_CLASS_NAME[classID] and SPEC_ID_BY_CLASS_NAME[classID][key] or nil
-end
-
-local function GetSpecNameFromID(specID)
-    if not specID then return nil end
-    BuildSpecMaps()
-    local lang = GetAddonLanguage()
-    if lang ~= "AUTO" then
-        local forced = GetStaticSpecName(specID, lang)
-        if forced and forced ~= "" then
-            return forced
-        end
-    end
-    if GetSpecializationInfoByID then
-        local _, name = GetSpecializationInfoByID(specID)
-        if name and name ~= "" then
-            return name
-        end
-    end
-    local _, _, classID = UnitClass("player")
-    local name = classID and SPEC_NAME_BY_CLASS_ID[classID] and SPEC_NAME_BY_CLASS_ID[classID][specID] or nil
-    return TitleCaseSpecName(name)
-end
--- Control de alertas de drop para evitar spam
-local LastDropAlert = {}
-local dropBatchStart = 0
-local dropBatchCount = 0
-local suppressOtherWonUntil = 0
-local PendingCoinReminders = {}
-local LastCoinReminderBoss = nil
-local lastCoinUsedAt = 0
-local lastInRaid = false
-local pendingRaidExitCheck = false
-local lastBonusRollItemID = nil
-local lastBonusRollTime = 0
-local TriggerLootReadyTimers
-local COIN_REMINDER_DELAY = 4
-local COIN_REMINDER_MIN_WAIT = 30
-local COIN_REMINDER_MAX_WAIT = 150
-local PREWARN_SOUND_ID = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081
-local COIN_LOST_SOUND_ID = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081
-local OTHER_WON_SOUND = "Sound\\Creature\\ArthasPrisoner\\UR_ArthasPrisoner_YSVisThree01.ogg"
-local ROLL_TRACK_WINDOW = 50
-local MULTI_DROP_SUPPRESS_WINDOW = 60
-local lastAnnouncedRollItemID = nil
-local lastAnnouncedRollTime = nil
-local lastPlayerRollItemID = nil
-local lastPlayerRollTime = nil
-local lastPlayerRollValue = nil
-local lastPlayerRollChoice = nil -- NEED, GREED, PASS, WON
-local ALERT_DEFAULT_DURATION = 6.8
-local ALERT_PRIORITY_PRIMARY = 1
+-- =============================================================
+-- SISTEMA DE ALERTAS (cola con prioridad)
+-- =============================================================
+-- Prioridades: 1 = primaria (ganado/perdido), 2 = secundaria, 3 = pre-aviso
+local ALERT_DEFAULT_DURATION  = 6.8
+local ALERT_PRIORITY_PRIMARY  = 1
 local ALERT_PRIORITY_SECONDARY = 2
-local ALERT_PRIORITY_PREWARN = 3
+local ALERT_PRIORITY_PREWARN  = 3
+
+-- Reenvía al sistema de cola de alertas definido en UI.lua
 local function EnqueueAlert(duration, priority, fn)
-    if addonTable and addonTable.EnqueueAlert then
+    if addonTable.EnqueueAlert then
         addonTable.EnqueueAlert(duration or ALERT_DEFAULT_DURATION, fn, priority or ALERT_PRIORITY_SECONDARY)
         return
     end
     if fn then fn() end
 end
+-- Exponer para que los módulos puedan encolar alertas
+addonTable._coreEnqueueAlert = EnqueueAlert
+
+-- Registra un mensaje en el log de alerta
 local function LogAlertDebug(msg)
-    if addonTable and addonTable.LogDebug then
+    if addonTable.LogDebug then
         addonTable.LogDebug(FormatLogPrefix("Alert") .. " " .. msg)
     end
 end
-local function GetCoinReminderWait()
-    local value = COIN_REMINDER_MAX_WAIT
-    if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder then
-        local saved = tonumber(LootHunterDB.settings.coinReminder.reminderDelay)
-        if saved then
-            value = saved
-        end
-        value = math.max(COIN_REMINDER_MIN_WAIT, math.min(COIN_REMINDER_MAX_WAIT, value))
-        LootHunterDB.settings.coinReminder.reminderDelay = value
-    end
-    return value
+
+-- Muestra la alerta de DROP cuando un item deseado aparece en el loot
+local function ShowDropAlert(itemID, itemData)
+    if not itemID or not itemData then return end
+    local now = GetTime and GetTime() or 0
+    -- Suprimir alertas duplicadas en menos de 2 segundos
+    if LastDropAlert[itemID] and (now - LastDropAlert[itemID]) < 2 then return end
+    LastDropAlert[itemID] = now
+
+    local allowScope = addonTable.IsScopeAllowed
+        and addonTable.IsScopeAllowed(LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts and LootHunterDB.settings.lootAlerts.lostAlertScope)
+        or true
+    if not allowScope then return end
+
+    local itemName = itemData.link or itemData.name or "?"
+    local isPriority = (LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts and LootHunterDB.settings.lootAlerts.itemSeen)
+    local headerIcon = isPriority and ICON_STAR or ICON_DIAMOND
+    local titleRaw   = L["DROP_ALERT_TITLE"] or "Your loot dropped!"
+    local title      = CreateGradient(titleRaw, 1, 0.9, 0.15, 1, 0.65, 0)
+    local banner     = string.format("%s %s %s", headerIcon, title, headerIcon)
+    local alertText  = string.format("%s\n%s", banner, itemName)
+
+    EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_PRIMARY, function()
+        if addonTable.ShowAlert   then addonTable.ShowAlert(alertText, 1, 0.9, 0.15) end
+        if addonTable.FlashScreen then addonTable.FlashScreen("YELLOW") end
+        local soundID = (SOUNDKIT and SOUNDKIT.UI_BONUS_ROLL_START) or 12867
+        if not PlaySound(soundID, "Master") then PlaySound(soundID) end
+    end)
+    LogAlertDebug("DROP alert shown for item " .. tostring(itemID))
 end
--- TABLA DE CATEGORÍAS
-local SLOT_INFO = {}
-local function RebuildSlotInfo()
-    SLOT_INFO = {
-        ["RAID_TOKEN"] = { order = 0, name = L["RAID_TOKEN"] },
-        ["INVTYPE_HEAD"] = { order = 1, name = L["HEAD"] },
-        ["INVTYPE_NECK"] = { order = 2, name = L["NECK"] },
-        ["INVTYPE_SHOULDER"] = { order = 3, name = L["SHOULDER"] },
-        ["INVTYPE_CLOAK"] = { order = 4, name = L["CLOAK"] },
-        ["INVTYPE_CHEST"] = { order = 5, name = L["CHEST"] },
-        ["INVTYPE_ROBE"] = { order = 5, name = L["CHEST"] },
-        ["INVTYPE_WRIST"] = { order = 6, name = L["WRIST"] },
-        ["INVTYPE_HAND"] = { order = 7, name = L["HAND"] },
-        ["INVTYPE_WAIST"] = { order = 8, name = L["WAIST"] },
-        ["INVTYPE_LEGS"] = { order = 9, name = L["LEGS"] },
-        ["INVTYPE_FEET"] = { order = 10, name = L["FEET"] },
-        ["INVTYPE_FINGER"] = { order = 11, name = L["FINGER"] },
-        ["INVTYPE_TRINKET"] = { order = 12, name = L["TRINKET"] },
-        ["INVTYPE_WEAPON"] = { order = 13, name = L["WEAPON_1H"] },
-        ["INVTYPE_WEAPONMAINHAND"] = { order = 13, name = L["WEAPON_MAIN"] },
-        ["INVTYPE_WEAPONOFFHAND"] = { order = 14, name = L["WEAPON_OFF"] },
-        ["INVTYPE_SHIELD"] = { order = 14, name = L["SHIELD"] },
-        ["INVTYPE_HOLDABLE"] = { order = 14, name = L["HOLDABLE"] },
-        ["INVTYPE_2HWEAPON"] = { order = 15, name = L["WEAPON_2H"] },
-        ["INVTYPE_RANGED"] = { order = 16, name = L["RANGED"] },
-        ["INVTYPE_RANGEDRIGHT"] = { order = 16, name = L["RANGED"] },
-        ["INVTYPE_THROWN"] = { order = 16, name = L["RANGED"] },
-        ["INVTYPE_WAND"] = { order = 16, name = L["RANGED"] },
-        ["INVTYPE_RELIC"] = { order = 16, name = L["RELIC"] },
-        ["MOUNT"] = { order = 17, name = L["MOUNT"] },
-    }
-    addonTable.SLOT_INFO = SLOT_INFO
-end
-addonTable.RebuildSlotInfo = RebuildSlotInfo
-RebuildSlotInfo()
+addonTable.ShowDropAlert = ShowDropAlert
+
 -- =============================================================
--- 2. LÓGICA DE EVENTOS
+-- CONFIGURACIÓN POR DEFECTO (settings)
 -- =============================================================
 local function InitializeSettings()
     local defaults = {
         coinReminder = {
-            enabled = true,
-            preWarning = true,
-            channel = "SELF",
-            visualAlert = true,
+            enabled      = true,
+            preWarning   = true,
+            channel      = "SELF",
+            visualAlert  = true,
             soundEnabled = true,
-            soundFile = 12867, -- ID de sonido por defecto del codigo original
+            soundFile    = 12867,
             reminderDelay = 60,
         },
         lootAlerts = {
-            itemWon = true,
-            itemSeen = true,
-            otherWonSound = true,
+            itemWon          = true,
+            itemSeen         = true,
+            otherWonSound    = true,
             lostAlertEnabled = true,
-            lostAlertScope = "RAID",
-            bossNoItems = false,
+            lostAlertScope   = "RAID",
+            bossNoItems      = false,
         },
         misc = {
             heroicQueueConfirm = true,
-            muteRaidChannels = false,
+            muteRaidChannels   = false,
         },
         general = {
             windowsLocked = true,
-            debugLogging = false,
-            debugLogMax = 1000,
-            language = "AUTO",
-            helpSeen = false,
-            uiScale = 1.0,
+            debugLogging  = false,
+            debugLogMax   = 1000,
+            language      = "AUTO",
+            helpSeen      = false,
+            uiScale       = 1.0,
         },
         stats = {
             maxSessions = 25,
@@ -978,7 +178,7 @@ local function InitializeSettings()
         LootHunterDB.settings = defaults
         return
     end
-    -- Merge profundo de defaults para usuarios existentes sin sobrescribir sus preferencias
+    -- Merge profundo de defaults preservando las preferencias del usuario
     for category, settings in pairs(defaults) do
         if not LootHunterDB.settings[category] then
             LootHunterDB.settings[category] = settings
@@ -990,168 +190,23 @@ local function InitializeSettings()
             end
         end
     end
-    -- Normalizar alcance de alerta de loot perdido
+    -- Normalizar el alcance de alerta de loot perdido
     if LootHunterDB.settings and LootHunterDB.settings.lootAlerts then
         local scope = LootHunterDB.settings.lootAlerts.lostAlertScope
         local valid = { ALL = true, RAID = true, DUNGEON = true }
-        if not valid[scope] then
-            LootHunterDB.settings.lootAlerts.lostAlertScope = "RAID"
-        end
+        if not valid[scope] then LootHunterDB.settings.lootAlerts.lostAlertScope = "RAID" end
     end
-    if LootHunterDB.settings and LootHunterDB.settings.stats and LootHunterDB.settings.stats.maxSessions then
-        local maxSessions = tonumber(LootHunterDB.settings.stats.maxSessions) or 25
-        maxSessions = math.max(25, math.min(50, maxSessions))
-        StatsStore.MAX_SESSION_LOGS = maxSessions
+    -- Sincronizar MAX_SESSION_LOGS desde la configuración del usuario
+    if LootHunterDB.settings.stats and LootHunterDB.settings.stats.maxSessions then
+        local maxS = math.max(25, math.min(50, tonumber(LootHunterDB.settings.stats.maxSessions) or 25))
+        if addonTable.StatsStore then addonTable.StatsStore.MAX_SESSION_LOGS = maxS end
     end
 end
 
-local raidChatFilterActive = false
-local function ShouldMuteChannelName(channelName)
-    if not channelName or channelName == "" then return false end
-    local name = string.lower(channelName)
-    name = name:gsub("^%d+%.%s*", "")
-    local tokens = {
-        "general",
-        "trade",
-        "comercio",
-        "defense",
-        "defensa",
-        "looking",
-        "lfg",
-        "buscar",
-    }
-    for _, token in ipairs(tokens) do
-        if name:find(token, 1, true) then
-            return true
-        end
-    end
-    return false
-end
-
-local function RaidChannelFilter(self, event, msg, author, language, channelName, ...)
-    if not raidChatFilterActive then return false end
-    local inInstance, instanceType = IsInInstance()
-    if not (inInstance and instanceType == "raid") then
-        return false
-    end
-    if ShouldMuteChannelName(channelName) then
-        return true
-    end
-    return false
-end
-
-UpdateRaidChatFilter = function()
-    local shouldMute = false
-    if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.misc and LootHunterDB.settings.misc.muteRaidChannels then
-        local inInstance, instanceType = IsInInstance()
-        shouldMute = inInstance and instanceType == "raid"
-    end
-    if shouldMute and not raidChatFilterActive then
-        ChatFrame_AddMessageEventFilter("CHAT_MSG_CHANNEL", RaidChannelFilter)
-        raidChatFilterActive = true
-    elseif (not shouldMute) and raidChatFilterActive then
-        ChatFrame_RemoveMessageEventFilter("CHAT_MSG_CHANNEL", RaidChannelFilter)
-        raidChatFilterActive = false
-    end
-end
-addonTable.UpdateRaidChatFilter = UpdateRaidChatFilter
-
-local ValidateAddonAssets
-local MigrateSpecIDs
-local function HandleAddonLoaded(event, arg1)
-    if arg1 == "Blizzard_EncounterJournal" then
-        EJUnavailable = false
-        EJUnavailableLogged = false
-        if ResolveAllUnknownSources then
-            ResolveAllUnknownSources()
-        else
-            -- Si el resolver aún no está definido (por orden de carga), reintenta en el siguiente tick
-            C_Timer.After(0, function()
-                if ResolveAllUnknownSources then
-                    ResolveAllUnknownSources()
-                end
-            end)
-        end
-        return
-    end
-    if arg1 == "Blizzard_LFDUI" then
-        SetupHeroicQueueConfirm()
-        return
-    end
-    if arg1 ~= addonName then return end
-    addonTable.version = GetAddOnMetadata(addonName, "Version") or "v1.0"
-
-    if LootHunterDB == nil then LootHunterDB = {} end
-
-    InitializeSettings()
-    addonTable.db = LootHunterDB -- Compartir DB con otros archivos
-    if addonTable.ApplyLocale then
-        addonTable.ApplyLocale()
-    end
-    if addonTable.RebuildSlotInfo then
-        addonTable.RebuildSlotInfo()
-    end
-    ValidateAddonAssets()
-
-    if not LootHunterDB.windowSettings then
-        local screenWidth = (GetScreenWidth and GetScreenWidth()) or (UIParent and UIParent:GetWidth()) or 0
-        local defaultX = -math.floor((screenWidth or 0) * 0.10)
-        local defaultWidth = addonTable.DEFAULT_WINDOW_WIDTH or 530
-        local defaultHeight = addonTable.DEFAULT_WINDOW_HEIGHT or 456
-        LootHunterDB.windowSettings = {
-            point = "RIGHT",
-            relativePoint = "RIGHT",
-            x = defaultX,
-            y = 0,
-            width = defaultWidth,
-            height = defaultHeight,
-        }
-    end
-    if not LootHunterDB.buttonPos then
-        LootHunterDB.buttonPos = { point = "CENTER", x = -200, y = 0 }
-    end
-
-    if not LootHunterDB.Characters then LootHunterDB.Characters = {} end
-    charKey = UnitName("player") .. " - " .. GetRealmName()
-    if not LootHunterDB.Characters[charKey] then LootHunterDB.Characters[charKey] = {} end
-    CurrentCharDB = LootHunterDB.Characters[charKey]
-    addonTable.CurrentCharDB = CurrentCharDB -- Compartir con UI.lua
-    StatsStore:EnsureHistoryDB()
-    StatsStore:EnsureSessionDB()
-    MigrateSpecIDs()
-
-    local count = 0
-    for k, v in pairs(CurrentCharDB) do 
-        if type(k) == "number" then 
-            count = count + 1
-            if type(v) == "table" and v.status == 1 then v.status = 0 end
-        end
-    end
-    
-    print(string.format(L["LOADED_MSG"], charKey, count))
-    if addonTable.CreateMinimapIcon then
-        addonTable.CreateMinimapIcon()
-    end
-    BuildStaticDB()
-    SetupHeroicQueueConfirm()
-    UpdateRaidChatFilter()
-
-    hooksecurefunc("HandleModifiedItemClick", function(itemLink)
-        if not IsShiftKeyDown() or addonTable.SuppressAddItem then return end
-        if not (addonTable.MainFrame and addonTable.MainFrame:IsShown()) then return end
-        if not itemLink or ChatEdit_GetActiveWindow() then return end
-        local safeLink = itemLink
-    C_Timer.After(0, function()
-        if addonTable.SuppressAddItem then return end
-        if addonTable.MainFrame and addonTable.MainFrame:IsShown() then
-            AddItemToList(safeLink)
-        end
-    end)
-end)
-
-end
-
-ValidateAddonAssets = function()
+-- =============================================================
+-- VALIDATE ADDON ASSETS
+-- =============================================================
+local function ValidateAddonAssets()
     if type(L) ~= "table" then return end
     local missing = {}
     local fontPath = "Interface\\AddOns\\LootHunter\\Fonts\\Prototype.ttf"
@@ -1171,8 +226,7 @@ ValidateAddonAssets = function()
     if frame and frame.CreateTexture then
         local tex = frame:CreateTexture(nil, "ARTWORK")
         for _, relPath in ipairs(texturePaths) do
-            local ok = tex:SetTexture("Interface\\AddOns\\LootHunter\\" .. relPath)
-            if not ok then
+            if not tex:SetTexture("Interface\\AddOns\\LootHunter\\" .. relPath) then
                 table.insert(missing, relPath)
             end
         end
@@ -1180,2175 +234,373 @@ ValidateAddonAssets = function()
     end
     if #missing > 0 then
         local list = table.concat(missing, ", ")
-        local msg = string.format(L["ASSET_MISSING_MSG"] or "[Loot Hunter] Missing assets: %s", list)
-        print(msg)
+        print(string.format(L["ASSET_MISSING_MSG"] or "[Loot Hunter] Missing assets: %s", list))
         print(L["ASSET_MISSING_HINT"] or "[Loot Hunter] Verify the addon folder name is LootHunter.")
     end
 end
+
+-- =============================================================
+-- MANEJADORES DE EVENTOS PRINCIPALES
+-- =============================================================
+
+-- Actualiza la UI de forma diferida para evitar refrescos excesivos
 local function HandleInfoUpdate(event, arg1)
     if refresh_timer then return end
     refresh_timer = C_Timer.After(0.2, function()
-        if LootHunter_RefreshUI then
-            LootHunter_RefreshUI()
-        end
+        if LootHunter_RefreshUI then LootHunter_RefreshUI() end
         refresh_timer = nil
     end)
 end
--- Devuelve el nombre de la especializacion actual del jugador (si existe)
-NormalizeTalentTabInfo = function(tab, group)
-    if type(GetTalentTabInfo) ~= "function" then return nil, nil end
-    local ok, v1, v2, v3, v4, v5 = pcall(GetTalentTabInfo, tab, nil, nil, group)
-    if not ok then return nil, nil end
-    local name = nil
-    local pointsSpent = nil
-    if type(v1) == "string" then
-        name = v1
-        pointsSpent = v3
-    elseif type(v2) == "string" then
-        name = v2
-        if type(v3) == "number" then
-            pointsSpent = v3
-        elseif type(v4) == "number" then
-            pointsSpent = v4
-        elseif type(v5) == "number" then
-            pointsSpent = v5
-        end
-    else
-        name = v1
-        if type(v3) == "number" then
-            pointsSpent = v3
-        elseif type(v4) == "number" then
-            pointsSpent = v4
-        elseif type(v5) == "number" then
-            pointsSpent = v5
-        end
-    end
-    if type(name) == "number" then
-        if GetSpecializationInfoByID then
-            local _, specName = GetSpecializationInfoByID(name)
-            if specName and specName ~= "" then
-                name = specName
-            else
-                name = nil
-            end
-        else
-            name = nil
-        end
-    end
-    return name, tonumber(pointsSpent) or 0
-end
 
-local function GetTalentTabSpecName()
-    if type(GetTalentTabInfo) ~= "function" then return nil end
-
-    local group = (type(GetActiveTalentGroup) == "function" and GetActiveTalentGroup()) or 1
-    local maxTabs = 0
-    if type(GetNumTalentTabs) == "function" then
-        local okNum, numTabs = pcall(GetNumTalentTabs)
-        if okNum and numTabs and numTabs > 0 then
-            maxTabs = numTabs
-        end
-    end
-    if maxTabs == 0 then
-        maxTabs = 4
-    end
-
-    local bestName, bestPoints = nil, -1
-    for tab = 1, maxTabs do
-        local name, pts = NormalizeTalentTabInfo(tab, group)
-        if name and name ~= "" and pts > bestPoints then
-            bestPoints = pts
-            bestName = name
-        end
-    end
-    return bestName
-end
-
-local function GetPrimaryTreeSpecName()
-    if type(GetPrimaryTalentTree) ~= "function" then return nil end
-    local treeIndex = GetPrimaryTalentTree()
-    if not treeIndex or treeIndex == 0 then return nil end
-    local _, _, classID = UnitClass("player")
-    local classSpecs = classID and CLASS_FALLBACK_SPECS[classID]
-    return classSpecs and classSpecs[treeIndex] or nil
-end
-
-local function GetCurrentSpecName()
-    -- API estilo Retail
-    if GetSpecialization and GetSpecializationInfo then
-        local specIndex = GetSpecialization(false, false, GetActiveSpecGroup and GetActiveSpecGroup() or nil) or GetSpecialization()
-        if specIndex then
-            local _, specName = GetSpecializationInfo(specIndex)
-            if specName and specName ~= "" then
-                lastSpecName = specName
-                return specName
-            end
-        end
-        -- Respaldo de loot spec (MoP+)
-        if GetLootSpecialization and GetSpecializationInfoByID then
-            local lootSpecID = GetLootSpecialization()
-            if lootSpecID and lootSpecID > 0 then
-                local _, specName = GetSpecializationInfoByID(lootSpecID)
-                if specName and specName ~= "" then
-                    lastSpecName = specName
-                    return specName
-                end
-            end
-        end
-    end
-    -- Respaldo via inspect (MoP+)
-    if GetInspectSpecialization and GetSpecializationInfoByID then
-        local ok, specID = pcall(GetInspectSpecialization, "player")
-        if ok and specID and specID > 0 then
-            local _, specName = GetSpecializationInfoByID(specID)
-            if specName and specName ~= "" then
-                lastSpecName = specName
-                return specName
-            end
-        end
-    end
-    -- Classic/MoP: indice de arbol principal (mas confiable)
-    local primaryTreeSpec = GetPrimaryTreeSpecName()
-    if primaryTreeSpec and primaryTreeSpec ~= "" then
-        lastSpecName = primaryTreeSpec
-        return primaryTreeSpec
-    end
-
-    local talentSpec = GetTalentTabSpecName()
-    if talentSpec and talentSpec ~= "" then
-        lastSpecName = talentSpec
-        return talentSpec
-    end
-
-    -- Respaldo final: ultimo nombre conocido o nombre de clase
-    if lastSpecName and lastSpecName ~= "" then
-        return lastSpecName
-    end
-    local _, className = UnitClass("player")
-    return className
-end
--- Resuelve una especializacion valida usando la actual, la ultima conocida o el fallback de clase
-local function ResolveSpecName(preferred)
-    if preferred and preferred ~= "" then
-        lastSpecName = preferred
-        return preferred
-    end
-    return GetCurrentSpecName()
-end
-
-local function GetCurrentSpecID()
-    if GetSpecialization and GetSpecializationInfo then
-        local specIndex = GetSpecialization(false, false, GetActiveSpecGroup and GetActiveSpecGroup() or nil) or GetSpecialization()
-        if specIndex then
-            local specID = GetSpecializationInfo(specIndex)
-            if specID and specID > 0 then
-                return specID
-            end
-        end
-        if GetLootSpecialization then
-            local lootSpecID = GetLootSpecialization()
-            if lootSpecID and lootSpecID > 0 then
-                return lootSpecID
-            end
-        end
-    end
-    if GetInspectSpecialization then
-        local ok, specID = pcall(GetInspectSpecialization, "player")
-        if ok and specID and specID > 0 then
-            return specID
-        end
-    end
-    local _, _, classID = UnitClass("player")
-    local treeIndex = GetPrimaryTalentTree and GetPrimaryTalentTree() or nil
-    if classID and treeIndex and SPEC_ID_BY_CLASS[classID] and SPEC_ID_BY_CLASS[classID][treeIndex] then
-        return SPEC_ID_BY_CLASS[classID][treeIndex].id
-    end
-    return nil
-end
-
-local function ResolveSpecID(preferredName)
-    local specID = GetCurrentSpecID()
-    if specID then return specID end
-    if preferredName and preferredName ~= "" then
-        return GetSpecIDFromName(preferredName)
-    end
-    local resolvedName = ResolveSpecName()
-    return GetSpecIDFromName(resolvedName)
-end
-
-local function AddTalentTabNames(specs, seen)
-    local group = (type(GetActiveTalentGroup) == "function" and GetActiveTalentGroup()) or 1
-    local maxTabs = 0
-    if type(GetNumTalentTabs) == "function" then
-        local okNum, numTabs = pcall(GetNumTalentTabs)
-        if okNum and numTabs and numTabs > 0 then
-            maxTabs = numTabs
-        end
-    end
-    if maxTabs == 0 then
-        maxTabs = 4
-    end
-
-    for tab = 1, maxTabs do
-        local name = NormalizeTalentTabInfo(tab, group)
-        if name and name ~= "" and not seen[name] then
-            table.insert(specs, name)
-            seen[name] = true
-        end
-    end
-end
-
--- Devuelve la lista de especializaciones disponibles para el jugador actual (nombres)
-local function GetAvailableSpecs()
-    local specs = {}
-    local seen = {}
-    -- API por clase (Retail/MoP+)
-    if GetNumSpecializationsForClassID and GetSpecializationInfoForClassID then
-        local _, _, classID = UnitClass("player")
-        local okNum, num = pcall(GetNumSpecializationsForClassID, classID)
-        if okNum and num and num > 0 then
-            for i = 1, num do
-                local _, name = GetSpecializationInfoForClassID(classID, i)
-                if name and name ~= "" and not seen[name] then
-                    table.insert(specs, name)
-                    seen[name] = true
-                end
-            end
-        end
-    end
-    -- API Retail/MoP
-    if GetNumSpecializations and GetSpecializationInfo then
-        local ok, num = pcall(GetNumSpecializations)
-        if ok and num and num > 0 then
-            for i = 1, num do
-                local _, name = GetSpecializationInfo(i)
-                if name and name ~= "" and not seen[name] then
-                    table.insert(specs, name)
-                    seen[name] = true
-                end
-            end
-        end
-    end
-    -- API de talentos (estilo Classic)
-    if #specs == 0 then
-        AddTalentTabNames(specs, seen)
-    end
-    local className = select(1, UnitClass("player"))
-    local classNameLower = className and string.lower(className) or ""
-    if lastSpecName and lastSpecName ~= "" and string.lower(lastSpecName) ~= classNameLower and not seen[lastSpecName] then
-        table.insert(specs, lastSpecName)
-        seen[lastSpecName] = true
-    end
-    local _, _, classID = UnitClass("player")
-    if classID and CLASS_FALLBACK_SPECS[classID] then
-        for _, name in ipairs(CLASS_FALLBACK_SPECS[classID]) do
-            if not seen[name] then
-                table.insert(specs, name)
-                seen[name] = true
-            end
-        end
-    end
-    return specs
-end
-addonTable.GetAvailableSpecs = GetAvailableSpecs
-local function GetAvailableSpecsWithIDs()
-    BuildSpecMaps()
-    local specs = {}
-    local seen = {}
-    local _, _, classID = UnitClass("player")
-    local lang = GetAddonLanguage()
-    if classID and SPEC_ID_BY_CLASS[classID] and lang ~= "AUTO" then
-        for _, spec in ipairs(SPEC_ID_BY_CLASS[classID]) do
-            local name = GetSpecNameFromID(spec.id) or spec.names[1]
-            if spec.id and not seen[spec.id] then
-                table.insert(specs, { id = spec.id, name = name })
-                seen[spec.id] = true
-            end
-        end
-        return specs
-    end
-    if GetNumSpecializationsForClassID and GetSpecializationInfoForClassID and classID then
-        local okNum, num = pcall(GetNumSpecializationsForClassID, classID)
-        if okNum and num and num > 0 then
-            for i = 1, num do
-                local specID, name = GetSpecializationInfoForClassID(classID, i)
-                if specID and name and name ~= "" and not seen[specID] then
-                    table.insert(specs, { id = specID, name = name })
-                    seen[specID] = true
-                end
-            end
-        end
-    elseif GetNumSpecializations and GetSpecializationInfo then
-        local okNum, num = pcall(GetNumSpecializations)
-        if okNum and num and num > 0 then
-            for i = 1, num do
-                local specID, name = GetSpecializationInfo(i)
-                if specID and name and name ~= "" and not seen[specID] then
-                    table.insert(specs, { id = specID, name = name })
-                    seen[specID] = true
-                end
-            end
-        end
-    elseif classID and SPEC_ID_BY_CLASS[classID] then
-        for _, spec in ipairs(SPEC_ID_BY_CLASS[classID]) do
-            local name = GetSpecNameFromID(spec.id) or spec.names[1]
-            if spec.id and not seen[spec.id] then
-                table.insert(specs, { id = spec.id, name = name })
-                seen[spec.id] = true
-            end
-        end
-    end
-    return specs
-end
-addonTable.GetAvailableSpecsWithIDs = GetAvailableSpecsWithIDs
-addonTable.GetSpecIDFromName = GetSpecIDFromName
-addonTable.GetSpecNameFromID = GetSpecNameFromID
-
-MigrateSpecIDs = function()
-    BuildSpecMaps()
-    if not CurrentCharDB then return false end
-    local updated = false
-    for id, data in pairs(CurrentCharDB) do
-        if type(id) == "number" and type(data) == "table" then
-            if not data.specID and data.spec and data.spec ~= "" then
-                local specID = GetSpecIDFromName(data.spec)
-                if specID then
-                    data.specID = specID
-                    updated = true
-                end
-            end
-            if data.specID then
-                local name = GetSpecNameFromID(data.specID)
-                if name and name ~= "" and data.spec ~= name then
-                    data.spec = name
-                    updated = true
-                end
-            end
-        end
-    end
-    return updated
-end
-local function HandleSpecChange(event, unit)
-    if unit and unit ~= "player" then return end
-    lastSpecName = nil
-    lastSpecName = ResolveSpecName()
-    LootHunter_RefreshUI()
-end
-
--- Buscar la entrada de recordatorio de moneda que contenga un itemID
-local function FindReminderKeyForItem(itemID)
-    if not itemID then return nil end
-    for key, entry in pairs(PendingCoinReminders) do
-        if entry and entry.items then
-            for _, pendingID in ipairs(entry.items) do
-                if pendingID == itemID then
-                    return key
-                end
-            end
-        end
-    end
-    return nil
-end
-
-local function MarkDropSeen(itemID, reason)
-    local key = FindReminderKeyForItem(itemID)
-    if not key then return end
-    local entry = PendingCoinReminders[key]
-    if not entry then return end
-    entry.dropSeen = true
-    entry.dropSeenAt = GetTime()
-    LogCoinDebug(string.format("Drop seen for item %d (reason: %s). Coin reminder stays pending until resolved.", itemID, reason or "unknown"))
-end
-
-local function ShowDropAlert(itemID, itemData)
-    local alertSettings = LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts
-    if not alertSettings or alertSettings.itemSeen == false then
+-- Manejador del evento ADDON_LOADED: inicializa el addon o responde a sub-addons
+local function HandleAddonLoaded(event, arg1)
+    -- Responder a la carga tardía del Encounter Journal
+    if arg1 == "Blizzard_EncounterJournal" then
+        if addonTable.ResetEJFlags then addonTable.ResetEJFlags() end
+        C_Timer.After(0, function()
+            if addonTable.ResolveAllUnknownSources then addonTable.ResolveAllUnknownSources() end
+        end)
         return
     end
-    if not itemID and itemData and itemData.id then
-        itemID = itemData.id
+    -- Responder a la carga de la UI del buscador de mazmorras
+    if arg1 == "Blizzard_LFDUI" then
+        if addonTable.SetupHeroicQueueConfirm then addonTable.SetupHeroicQueueConfirm() end
+        return
     end
-    if not itemID then return end
-    itemData = itemData or (CurrentCharDB and CurrentCharDB[itemID])
-    if not itemData then return end
-    -- Actualiza estado en la DB
-    if CurrentCharDB and CurrentCharDB[itemID] then
-        CurrentCharDB[itemID].status = 1
-        CurrentCharDB[itemID].lastState = "drop"
-        StatsStore:RecordHistoryEvent("drop", { itemID = itemID, link = itemData.link or itemData.name, boss = itemData.boss, player = UnitName("player") })
+    if arg1 ~= addonName then return end
+
+    addonTable.version = GetAddOnMetadata(addonName, "Version") or "v1.0"
+    if LootHunterDB == nil then LootHunterDB = {} end
+
+    InitializeSettings()
+    addonTable.db = LootHunterDB
+
+    if addonTable.ApplyLocale    then addonTable.ApplyLocale() end
+    if addonTable.RebuildSlotInfo then addonTable.RebuildSlotInfo() end
+    ValidateAddonAssets()
+
+    -- Posición de ventana por defecto si no existe configuración previa
+    if not LootHunterDB.windowSettings then
+        local screenWidth = (GetScreenWidth and GetScreenWidth()) or (UIParent and UIParent:GetWidth()) or 0
+        local defaultX    = -math.floor(screenWidth * 0.10)
+        LootHunterDB.windowSettings = {
+            point         = "RIGHT",
+            relativePoint = "RIGHT",
+            x             = defaultX,
+            y             = 0,
+            width         = addonTable.DEFAULT_WINDOW_WIDTH  or 530,
+            height        = addonTable.DEFAULT_WINDOW_HEIGHT or 456,
+        }
     end
-    lastAnnouncedRollItemID = itemID
-    lastAnnouncedRollTime = GetTime()
-    MarkDropSeen(itemID, "drop_alert")
-    -- Auto-reset del estado DROP tras 45s si sigue pendiente
-    C_Timer.After(45, function()
-        if CurrentCharDB and CurrentCharDB[itemID] and CurrentCharDB[itemID].status == 1 then
-            CurrentCharDB[itemID].status = 0
-            LootHunter_RefreshUI()
+    if not LootHunterDB.buttonPos then
+        LootHunterDB.buttonPos = { point = "CENTER", x = -200, y = 0 }
+    end
+
+    -- Inicializar DB de personaje
+    if not LootHunterDB.Characters then LootHunterDB.Characters = {} end
+    charKey = UnitName("player") .. " - " .. GetRealmName()
+    addonTable.charKey = charKey
+    if not LootHunterDB.Characters[charKey] then LootHunterDB.Characters[charKey] = {} end
+    CurrentCharDB = LootHunterDB.Characters[charKey]
+    addonTable.CurrentCharDB = CurrentCharDB
+
+    -- Obtener referencia al StatsStore (definido en Modules/StatsStore.lua)
+    StatsStore = addonTable.StatsStore
+    if StatsStore then
+        StatsStore:EnsureHistoryDB()
+        StatsStore:EnsureSessionDB()
+    end
+    if addonTable.MigrateSpecIDs then addonTable.MigrateSpecIDs() end
+
+    -- Restaurar items en estado "visto" de vuelta a "pendiente" al cargar
+    local count = 0
+    for k, v in pairs(CurrentCharDB) do
+        if type(k) == "number" then
+            count = count + 1
+            if type(v) == "table" and v.status == 1 then v.status = 0 end
         end
+    end
+
+    print(string.format(L["LOADED_MSG"], charKey, count))
+
+    if addonTable.CreateMinimapIcon     then addonTable.CreateMinimapIcon() end
+    if addonTable.BuildStaticDB         then addonTable.BuildStaticDB() end
+    if addonTable.SetupHeroicQueueConfirm then addonTable.SetupHeroicQueueConfirm() end
+    if addonTable.UpdateRaidChatFilter  then addonTable.UpdateRaidChatFilter() end
+    if addonTable.ResolveAllUnknownSources then
+        C_Timer.After(2, addonTable.ResolveAllUnknownSources)
+    end
+
+    -- Hook en Shift+Click de items para agregarlos a la lista
+    hooksecurefunc("HandleModifiedItemClick", function(itemLink)
+        if not IsShiftKeyDown() or addonTable.SuppressAddItem then return end
+        if not (addonTable.MainFrame and addonTable.MainFrame:IsShown()) then return end
+        if not itemLink or ChatEdit_GetActiveWindow() then return end
+        local safeLink = itemLink
+        C_Timer.After(0, function()
+            if addonTable.SuppressAddItem then return end
+            if addonTable.MainFrame and addonTable.MainFrame:IsShown() then
+                AddItemToList(safeLink)
+            end
+        end)
     end)
-    local now = GetTime()
-    if LastDropAlert[itemID] and (now - LastDropAlert[itemID] < 2) then
-        return
-    end
-    LastDropAlert[itemID] = now
-    -- Detect batch of multiple tracked drops close in time to suppress other-won spam
-    if (now - (dropBatchStart or 0)) > 10 then
-        dropBatchStart = now
-        dropBatchCount = 0
-    end
-    dropBatchCount = (dropBatchCount or 0) + 1
-    if dropBatchCount >= 2 then
-        suppressOtherWonUntil = math.max(suppressOtherWonUntil or 0, now + MULTI_DROP_SUPPRESS_WINDOW)
-        LogAlertDebug(string.format("Multiple drops detected (%d in batch); suppressing other-won for %.1fs", dropBatchCount, suppressOtherWonUntil - now))
-    end
-    local dropTitle = CreateGradient(L["DROP_ALERT_TITLE"], 1, 0.7, 0.2, 1, 0.45, 0)
-    local isPriority = itemData and itemData.priority
-    local headerIcon = isPriority and ICON_STAR or ICON_DIAMOND
-    local dropHeader = string.format("%s %s %s", headerIcon, dropTitle, headerIcon)
-    local dropItemLine = string.format("%s!", itemData.link or itemData.name or tostring(itemID))
-    local _, instanceType = IsInInstance()
-    -- Only show the roll reminder prompt in raids (no /roll flow in dungeons).
-    local showPrompt = (instanceType == "raid")
-    local dropPrompt = showPrompt and CreateGradient(L["DROP_ALERT_PROMPT"], 1, 0.85, 0.35, 1, 0.75, 0) or nil
-    local priorityLine = nil
-    if isPriority then
-        local label = L["PRIORITY_DROP_ALERT_LABEL"] or "PRIORITY LOOT"
-        priorityLine = CreateGradient(label, 1, 0.9, 0.2, 1, 0.75, 0)
-    end
-    local alertText = (priorityLine and (priorityLine .. "\n") or "") .. dropHeader .. "\n" .. dropItemLine .. (dropPrompt and ("\n" .. dropPrompt) or "")
-    if not IsScopeAllowed(alertSettings.lostAlertScope) then
-        return
-    end
-    EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_PRIMARY, function()
-        if addonTable.FlashScreen then addonTable.FlashScreen(isPriority and "YELLOW" or "ORANGE") end
-        if addonTable.ShowAlert then
-            if isPriority then
-                addonTable.ShowAlert(alertText, 1, 0.85, 0.2)
-            else
-                addonTable.ShowAlert(alertText, 1, 0.55, 0.05)
-            end
-        end
-        if not PlaySound(12867, "Master") then
-            PlaySound(12867)
-        end
-    end)
-    if L["DROP_CHAT_MSG"] then
-        print(string.format(L["DROP_CHAT_MSG"], itemData.link or itemData.name or tostring(itemID)))
-    end
-    local displayName = itemData.link or itemData.name or tostring(itemID)
-    LogAlertDebug(string.format("DROP alert shown for item %s (%s)", tostring(itemID), displayName))
 end
 
+-- Manejador del evento LOOT_OPENED / LOOT_READY
 local function HandleLootEvent(event)
-    if PendingCoinReminders and next(PendingCoinReminders) then
-        LogCoinDebug(string.format("Event %s received. Checking pending coin timers.", event))
+    if addonTable.TriggerLootReadyTimers then
+        if LogCoinDebug then LogCoinDebug(string.format("Evento %s recibido. Revisando temporizadores de moneda.", event)) end
+        addonTable.TriggerLootReadyTimers()
     end
-    -- Al abrir el botín, si vemos items de la lista, disparar alerta DROP inmediata
+    -- Recorrer slots del loot actual y mostrar alertas de drop
     if CurrentCharDB and GetNumLootItems then
         local num = GetNumLootItems()
         for slot = 1, num do
-            local link = GetLootSlotLink(slot)
+            local link   = GetLootSlotLink(slot)
             local itemID = link and tonumber(link:match("item:(%d+):"))
             if itemID and CurrentCharDB[itemID] and CurrentCharDB[itemID].status == 0 then
                 ShowDropAlert(itemID, CurrentCharDB[itemID])
-                LootHunter_RefreshUI()
+                if LootHunter_RefreshUI then LootHunter_RefreshUI() end
             end
         end
     end
-    TriggerLootReadyTimers()
-end
--- === LÓGICA DE MONEDA (COIN REMINDER) ===
-local function TrimString(str)
-    if not str then return nil end
-    return (str:gsub("^%s+", ""):gsub("%s+$", ""))
-end
-local function ItemMatchesBossSource(itemData, bossName)
-    if not itemData or not bossName then return false end
-    local source = itemData.boss
-    if not source or source == "" or source == L["UNKNOWN_SOURCE"] then return false end
-    local srcLower = string.lower(source)
-    local bossLower = string.lower(bossName)
-    if srcLower:find(bossLower, 1, true) then return true end
-    for token in srcLower:gmatch("[^/]+") do
-        token = TrimString(token)
-        if token and token ~= "" then
-            if token:find(bossLower, 1, true) or bossLower:find(token, 1, true) then
-                return true
-            end
-            for dash in token:gmatch("[^%-]+") do
-                dash = TrimString(dash)
-                if dash and dash ~= "" then
-                    if dash:find(bossLower, 1, true) or bossLower:find(dash, 1, true) then
-                        return true
-                    end
-                end
-            end
-        end
-    end
-    return false
-end
-local function ProcessCoinReminder(key)
-    local entry = PendingCoinReminders[key]
-    if not entry or not CurrentCharDB then return end
-    local coinEnabled = entry.coinEnabled
-    if entry.blockCoin then
-        LogCoinDebug(string.format("Coin reminder for %s skipped because coin is blocked.", entry.boss or "Unknown"))
-        return
-    end
-    PendingCoinReminders[key] = nil
-    local stillMissing = {}
-    for _, id in ipairs(entry.items) do
-        local data = CurrentCharDB[id]
-        if data and data.status ~= 2 then
-            table.insert(stillMissing, data)
-        end
-    end
-    if #stillMissing == 0 then 
-        LogCoinDebug(string.format("Coin reminder for %s canceled: no items pending.", entry.boss or "Unknown"))
-        return 
-    end
-    if coinEnabled then
-        StatsStore:RecordHistoryEvent("coin_reminder", { boss = entry.boss, player = UnitName("player") })
-    end
-    if not entry.dropSeen then
-        StatsStore:RecordHistoryEvent("boss_no_loot", { boss = entry.boss, player = UnitName("player") })
-    end
-    if coinEnabled and LootHunterDB.settings.coinReminder.visualAlert then
-        local chatFmt = L["COIN_REMINDER_RAID_CHAT"] or L["COIN_REMINDER_RAID_MSG"]
-        local chatMsg = string.format(chatFmt, entry.boss)
-        if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-            DEFAULT_CHAT_FRAME:AddMessage(chatMsg)
-        else
-            print(chatMsg)
-        end
-
-        local titleRaw = L["COIN_REMINDER_ALERT_TITLE"] or "Your loot didn't drop!"
-        local promptRaw = L["COIN_REMINDER_ALERT_PROMPT"] or "Use your coin now!"
-        local title = (addonTable.CreateGradient and addonTable.CreateGradient(titleRaw, 1, 0.85, 0.35, 1, 0.75, 0)) or titleRaw
-        local prompt = (addonTable.CreateGradient and addonTable.CreateGradient(promptRaw, 1, 0.85, 0.35, 1, 0.75, 0)) or promptRaw
-        local msg = string.format("%s %s %s\n%s", ICON_DIAMOND, title, ICON_DIAMOND, prompt)
-
-        EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_SECONDARY, function()
-            if addonTable.ShowAlert then
-                addonTable.ShowAlert(msg, 1, 0.85, 0)
-            else
-                print(msg)
-            end
-            if addonTable.FlashScreen then
-                addonTable.FlashScreen("YELLOW")
-            end
-        end)
-        LogAlertDebug("Coin reminder alert shown for " .. (entry.boss or "Unknown"))
-    end
-    -- Alertas visuales y sonoras
-    if coinEnabled and LootHunterDB.settings.coinReminder.soundEnabled then
-        PlaySound(LootHunterDB.settings.coinReminder.soundFile or 12867) -- Sonido de alerta
-    end
-    if coinEnabled then
-        print(string.format(L["COIN_REMINDER_CHAT_MSG"], entry.boss))
-    end
-    if addonTable.LogDebug then
-        local names = {}
-        for _, data in ipairs(stillMissing) do
-            table.insert(names, data.name or tostring(data.id))
-        end
-        addonTable.LogDebug(FormatLogPrefix("Loot Hunter") .. " Coin reminder triggered: " .. entry.boss .. " -> " .. table.concat(names, ", "))
-    end
-end
-local function StartCoinReminderTimer(key, reason, delay)
-    local entry = PendingCoinReminders[key]
-    if not entry or entry.timerStarted then return end
-    if entry.blockCoin then
-        LogCoinDebug(string.format("Coin timer blocked for %s (reason: %s).", entry.boss or "Unknown", reason or "unknown"))
-        return
-    end
-    if entry.deferStartUntil and GetTime() < entry.deferStartUntil then
-        LogCoinDebug("Coin timer deferred until boss pre-warning completes.")
-        return
-    end
-    entry.timerStarted = true
-    delay = delay or COIN_REMINDER_DELAY
-    LogCoinDebug(string.format("Coin timer started for %s (reason: %s, delay: %.1fs)", entry.boss or "Unknown", reason or "unspecified", delay))
-    C_Timer.After(delay, function()
-        LogCoinDebug(string.format("Coin timer finished for %s. Processing reminder.", entry.boss or "Unknown"))
-        ProcessCoinReminder(key)
-    end)
-end
-local function CancelCoinRemindersForBonusRoll(reason)
-    if not PendingCoinReminders or not next(PendingCoinReminders) then return end
-    for key, entry in pairs(PendingCoinReminders) do
-        if entry then
-            entry.blockCoin = true
-            PendingCoinReminders[key] = nil
-            LogCoinDebug(string.format("Coin reminder canceled for %s due to bonus roll (%s).", entry.boss or "Unknown", reason or "bonus_roll"))
-        end
-    end
-end
-local function ActivatePendingForBonusRoll(reason)
-    CancelCoinRemindersForBonusRoll(reason or "bonus_roll_activate")
-end
-local function RemoveItemFromReminder(itemID)
-    local key = FindReminderKeyForItem(itemID)
-    if not key then return end
-    local entry = PendingCoinReminders[key]
-    if not entry or not entry.items then return end
-    local remaining = {}
-    for _, pendingID in ipairs(entry.items) do
-        if pendingID ~= itemID then
-            table.insert(remaining, pendingID)
-        end
-    end
-    entry.items = remaining
-    if #remaining == 0 then
-        PendingCoinReminders[key] = nil
-    end
-end
--- Buffs de moneda MoP: Seal of Power (LFR), Seal of Fate (Normal)
-local bonusSpellIDs = {126938, 128362}
-local function HasBonusRollBuff()
-    for i=1, 40 do
-        -- UnitBuff devuelve varios valores, solo necesitamos spellID (10mo valor)
-        local _, _, _, _, _, _, _, _, _, spellID = UnitBuff("player", i)
-        if not spellID then break end -- No hay mas buffs
-        for _, id in ipairs(bonusSpellIDs) do
-            if spellID == id then
-                return true
-            end
-        end
-    end
-    return false
-end
-local function RecordCoinUsedOnce(reason)
-    local now = GetTime and GetTime() or 0
-    if (now - (lastCoinUsedAt or 0)) < 5 then
-        return
-    end
-    lastCoinUsedAt = now
-    StatsStore:RecordHistoryEvent("coin_used", { boss = LastCoinReminderBoss, player = UnitName("player"), reason = reason })
-end
-local function HandleBonusRollActivate(event, ...)
-    LogCoinDebug(FormatLogPrefix("Coin Debug") .. " BONUS_ROLL_ACTIVATE received")
-    LogCoinDebug(string.format("Bonus roll window visible: %s", tostring(IsBonusRollWindowVisible())))
-    RecordCoinUsedOnce("bonus_roll_activate")
-    -- Iniciar secuencia de 2 fases (10s aviso -> 35s alerta)
-    ActivatePendingForBonusRoll("bonus_roll_activate")
-end
-local function HandleBonusRollResult(event, rollID, result, rewardType, itemID, itemLink)
-    local id = itemID
-    if not id and type(itemLink) == "string" then
-        id = tonumber(itemLink:match("item:(%d+):"))
-    end
-    if id then
-        lastBonusRollItemID = id
-        lastBonusRollTime = GetTime and GetTime() or 0
-    end
-end
-local function HandleUnitAura(event, unit)
-    if unit ~= "player" then return end
-    if HasBonusRollBuff() then
-        LogCoinDebug(FormatLogPrefix("Coin Debug") .. " Bonus Roll buff detected")
-        ActivatePendingForBonusRoll("bonus_roll_buff")
-    end
-end
-function IsBonusRollWindowVisible()
-    local frame = _G.BonusRollFrame
-    return frame and frame:IsShown()
-end
-local function ScheduleCoinReminder(encounterID, bossName, forceRaid, forcePreWarn)
-    if not CurrentCharDB or not bossName or bossName == "" or not (LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder) then return end
-    local coinEnabled = LootHunterDB.settings.coinReminder.enabled
-    local _, instanceType = IsInInstance()
-    LastCoinReminderBoss = bossName
-    local instanceName = (GetInstanceInfo and select(1, GetInstanceInfo())) or nil
-    local reminderDelay = GetCoinReminderWait()
-    LogCoinDebug(string.format("User-configured coin wait set to %.0fs for %s", reminderDelay, bossName))
-    local pendingItems = {}
-    for id, data in pairs(CurrentCharDB) do
-        if type(id) == "number" and type(data) == "table" and data.status == 0 then
-            if ItemMatchesBossSource(data, bossName) then
-                table.insert(pendingItems, id)
-            end
-        end
-    end
-    if #pendingItems == 0 then 
-        if instanceName and instanceName ~= "" then
-            local instanceLower = string.lower(instanceName)
-            local hasInstanceItems = false
-            for id, data in pairs(CurrentCharDB) do
-                if type(id) == "number" and type(data) == "table" and data.boss and data.boss ~= "" and data.boss ~= L["UNKNOWN_SOURCE"] then
-                    local srcLower = string.lower(data.boss)
-                    if srcLower:find(instanceLower, 1, true) then
-                        hasInstanceItems = true
-                        break
-                    end
-                    local instPart = srcLower:match("^(.-)%s*%-%s*.+$")
-                    if instPart and instPart:find(instanceLower, 1, true) then
-                        hasInstanceItems = true
-                        break
-                    end
-                end
-            end
-            if hasInstanceItems and LootHunterDB and LootHunterDB.settings
-                and LootHunterDB.settings.lootAlerts
-                and LootHunterDB.settings.lootAlerts.bossNoItems then
-                local coloredBoss = string.format("|cffff0000%s|r", bossName)
-                print(string.format(L["COIN_NO_ITEMS_BOSS"], coloredBoss))
-                LogCoinDebug(string.format("Boss %s has no items in list (instance: %s).", bossName, instanceName))
-            end
-        else
-            LogCoinDebug(string.format("Skipping boss-no-items message for %s: instance name missing.", bossName))
-        end
-        LogCoinDebug(string.format("No pending items matched %s. No reminder scheduled.", bossName))
-        return 
-    end
-    if not forceRaid and instanceType ~= "raid" then
-        LogCoinDebug(string.format("Skipping coin reminder for %s because instance type is %s.", bossName, tostring(instanceType)))
-        return
-    end
-    local itemList = {}
-    for _, pendingID in ipairs(pendingItems) do
-        local data = CurrentCharDB[pendingID]
-        table.insert(itemList, data and (data.name or tostring(pendingID)) or tostring(pendingID))
-    end
-    LogCoinDebug(string.format("Coin logic starting for %s with %d pending items (%s)", bossName, #pendingItems, table.concat(itemList, ", ")))
-    local key = string.lower(bossName) .. ":" .. tostring(encounterID or 0)
-    PendingCoinReminders[key] = {
-        boss = bossName,
-        encounterID = encounterID,
-        items = pendingItems,
-        timerStarted = false,
-        dropSeen = false,
-        blockCoin = false,
-        coinEnabled = coinEnabled,
-        deathTime = GetTime(),
-    }
-    if coinEnabled and LootHunterDB.settings.coinReminder.preWarning then
-        C_Timer.After(3, function()
-            local entry = PendingCoinReminders[key]
-            if not entry then return end
-            local windowVisible = IsBonusRollWindowVisible()
-            if windowVisible or forcePreWarn then
-                LogCoinDebug(string.format("Pre-warning window visible for %s: %s", entry.boss or "Unknown", tostring(windowVisible)))
-                local msg = string.format(L["COIN_PRE_WARNING"] or (FormatLogPrefix("Loot Hunter") .. " %s might have your loot. Get your coin ready!"), entry.boss)
-                if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-                    DEFAULT_CHAT_FRAME:AddMessage(msg)
-                else
-                    print(msg)
-                end
-                if addonTable.ShowPreWarningFrame then
-                    EnqueueAlert(6, ALERT_PRIORITY_PREWARN, function()
-                        addonTable.ShowPreWarningFrame(msg, 6)
-                        if PREWARN_SOUND_ID then PlaySound(PREWARN_SOUND_ID, "Master") end
-                    end)
-                else
-                    if PREWARN_SOUND_ID then PlaySound(PREWARN_SOUND_ID, "Master") end
-                end
-                LogAlertDebug("Pre-warning shown for " .. (entry.boss or "Unknown"))
-            end
-        end)
-    end
-    local itemNames = {}
-    for _, pendingID in ipairs(pendingItems) do
-        local data = CurrentCharDB[pendingID]
-        table.insert(itemNames, data and (data.name or tostring(pendingID)) or tostring(pendingID))
-    end
-    LogCoinDebug(string.format("Scheduled coin reminder for %s with %d pending items: %s", bossName, #pendingItems, table.concat(itemNames, ", ")))
-    LogCoinDebug(string.format("Scheduling no-drop timer for %s with wait %.0fs (user value).", bossName, reminderDelay))
-    C_Timer.After(reminderDelay, function()
-        local entry = PendingCoinReminders[key]
-        if not entry then return end
-        if entry.blockCoin then
-            LogCoinDebug(string.format("No-drop timer skipped for %s because coin is blocked.", entry.boss or "Unknown"))
-            return
-        end
-        if not entry.coinEnabled then
-            if not entry.dropSeen and not entry.bossNoLootRecorded then
-                entry.bossNoLootRecorded = true
-                StatsStore:RecordHistoryEvent("boss_no_loot", { boss = entry.boss, player = UnitName("player") })
-                LogCoinDebug(string.format("Boss-no-loot stat recorded for %s (coin reminder disabled).", entry.boss or "Unknown"))
-            end
-            PendingCoinReminders[key] = nil
-            return
-        end
-        if not IsBonusRollWindowVisible() then
-            LogCoinDebug(string.format("No-drop timer for %s fired but Bonus Roll window is not visible, skipping reminder.", entry.boss or "Unknown"))
-            if not entry.dropSeen and not entry.bossNoLootRecorded then
-                entry.bossNoLootRecorded = true
-                StatsStore:RecordHistoryEvent("boss_no_loot", { boss = entry.boss, player = UnitName("player") })
-                LogCoinDebug(string.format("Boss-no-loot stat recorded for %s (no drop seen, no bonus roll window).", entry.boss or "Unknown"))
-            end
-            PendingCoinReminders[key] = nil
-            return
-        end
-        LogCoinDebug(string.format("No-drop timer (%.0fs) expired for %s. Triggering reminder.", reminderDelay, entry.boss or "Unknown"))
-        StartCoinReminderTimer(key, "no_drop", 0)
-    end)
-end
-TriggerLootReadyTimers = function()
-    for key, entry in pairs(PendingCoinReminders) do
-        if entry then
-            if not entry.timerStarted then
-                LogCoinDebug(string.format("Loot event ready/opened for %s (drop seen=%s).", entry.boss or "Unknown", tostring(entry.dropSeen)))
-            elseif entry.isTwoStage then
-                -- Si abres el loot durante la espera larga, procesar inmediatamente
-                LogCoinDebug("Loot opened during 2-stage wait. Processing immediately.")
-                ProcessCoinReminder(key)
-            end
-        end
-    end
-end
-local function TriggerLootActivityTimerForItemID(itemID)
-    if not itemID then return end
-    itemID = tonumber(itemID)
-    if not itemID then return end
-    for key, entry in pairs(PendingCoinReminders) do
-        local match = false
-        for _, pendingID in ipairs(entry.items) do
-            if pendingID == itemID then match = true; break end
-        end
-        if match then
-            LogCoinDebug(string.format("Loot activity detected for tracked itemID %d.", itemID))
-            MarkDropSeen(itemID, "loot_activity")
-        end
-    end
-end
--- Ayuda visual para boton manual
-local function ShowCoinReminderVisual(bossName)
-    local title = CreateGradient(L["COIN_REMINDER_ALERT_TITLE"], 1, 0.85, 0.35, 1, 0.75, 0)
-    local prompt = CreateGradient(L["COIN_REMINDER_ALERT_PROMPT"], 1, 0.85, 0.35, 1, 0.75, 0)
-    local text = string.format("%s %s %s\n%s", ICON_TRIANGLE, title, ICON_TRIANGLE, prompt)
-    EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_SECONDARY, function()
-        if addonTable.ShowAlert then
-            addonTable.ShowAlert(text, 1, 0.9, 0.15)
-        end
-        if addonTable.FlashScreen then
-            addonTable.FlashScreen("YELLOW")
-        end
-        local soundID = (SOUNDKIT and SOUNDKIT.UI_BONUS_ROLL_START) or 12867
-        PlaySound(soundID)
-    end)
-    LogAlertDebug("Coin reminder manual alert shown for " .. (bossName or "Unknown"))
-end
-addonTable.ShowCoinReminderVisual = ShowCoinReminderVisual
--- Manejadores de Boss Kill (ahora que ScheduleCoinReminder está definido)
-local function HandleBossKill(event, encounterID, bossName)
-    LogCoinDebug(string.format("BOSS_KILL detected: %s (encounterID=%s)", bossName or "?", tostring(encounterID)))
-    if StatsStore then
-        StatsStore:EnsureCurrentSession(true)
-    end
-    if bossName and bossName ~= "" then
-        ScheduleCoinReminder(encounterID, bossName)
-    end
-end
-local function HandleEncounterEnd(event, encounterID, bossName, _, endStatus)
-    if endStatus == 1 then -- 1 significa éxito
-        LogCoinDebug(string.format("ENCOUNTER_END success detected: %s (encounterID=%s)", bossName or "?", tostring(encounterID)))
-        if StatsStore then
-            StatsStore:EnsureCurrentSession(true)
-        end
-        if bossName and bossName ~= "" then
-            ScheduleCoinReminder(encounterID, bossName)
-        end
-    end
-end
--- Patrones de loot multi-idioma basados en GlobalStrings
-local function NormalizeLootFormat(fmt)
-    if type(fmt) ~= "string" then return fmt end
-    fmt = fmt:gsub("%%(%d+)%$s", "%%s")
-    fmt = fmt:gsub("%%(%d+)%$d", "%%d")
-    return fmt
 end
 
-local function BuildSelfLootPatterns()
-    local patterns = {}
-    local formats = {
-        { fmt = LOOT_ITEM_PUSHED_SELF, bonus = false },
-        { fmt = LOOT_ITEM_SELF, bonus = false },
-        { fmt = LOOT_ITEM_SELF_MULTIPLE, bonus = false },
-        { fmt = LOOT_ITEM_BONUS_ROLL_SELF, bonus = true },
-        { fmt = LOOT_ITEM_BONUS_ROLL_SELF_MULTIPLE, bonus = true },
-    }
-    for _, entry in ipairs(formats) do
-        local fmt = NormalizeLootFormat(entry.fmt)
-        if type(fmt) == "string" and fmt ~= "" then
-            local pattern = "^" .. fmt:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
-            table.insert(patterns, { pattern = pattern, isBonusRoll = entry.bonus })
-        end
+-- Manejador de BOSS_KILL: dispara el recordatorio de moneda
+local function HandleBossKill(event, encounterID, bossName, ...)
+    if not bossName or bossName == "" then return end
+    if addonTable.ScheduleCoinReminder then
+        addonTable.ScheduleCoinReminder(encounterID, bossName)
     end
-    return patterns
 end
 
-local function BuildCreatedLootPatterns()
-    local patterns = {}
-    local formats = {
-        LOOT_ITEM_CREATED_SELF,
-        LOOT_ITEM_CREATED_SELF_MULTIPLE,
-        LOOT_ITEM_CREATED,
-        LOOT_ITEM_CREATED_MULTIPLE,
-    }
-    for _, fmt in ipairs(formats) do
-        fmt = NormalizeLootFormat(fmt)
-        if type(fmt) == "string" and fmt ~= "" then
-            local pattern = "^" .. fmt:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
-            table.insert(patterns, pattern)
-        end
+-- Manejador de ENCOUNTER_END: fallback si BOSS_KILL no disparó
+local function HandleEncounterEnd(event, encounterID, bossName, _, success, ...)
+    if tonumber(success) ~= 1 then return end
+    if not bossName or bossName == "" then return end
+    if addonTable.ScheduleCoinReminder then
+        addonTable.ScheduleCoinReminder(encounterID, bossName)
     end
-    return patterns
 end
 
-local function BuildOtherLootPatterns()
-    local patterns = {}
-    local formats = {
-        { fmt = LOOT_ITEM_PUSHED, bonus = false },
-        { fmt = LOOT_ITEM, bonus = false },
-        { fmt = LOOT_ITEM_MULTIPLE, bonus = false },
-        { fmt = LOOT_ITEM_BONUS_ROLL_OTHER, bonus = true },
-        { fmt = LOOT_ITEM_BONUS_ROLL_OTHER_MULTIPLE, bonus = true },
-    }
-    for _, entry in ipairs(formats) do
-        local fmt = NormalizeLootFormat(entry.fmt)
-        if type(fmt) == "string" and fmt ~= "" then
-            local pattern = "^" .. fmt:gsub("%%s", "(.-)", 1):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
-            table.insert(patterns, { pattern = pattern, isBonusRoll = entry.bonus })
-        end
+-- =============================================================
+-- ADD ITEM TO LIST
+-- =============================================================
+
+-- Solicita los datos del item al servidor si no están disponibles aún
+local function RequestItemData(itemID)
+    if C_Item and C_Item.RequestLoadItemDataByID then
+        C_Item.RequestLoadItemDataByID(itemID)
+    elseif C_Item and C_Item.RequestServerCache then
+        C_Item.RequestServerCache(itemID)
     end
-    return patterns
+    GetItemInfo(itemID)
 end
 
-local function BuildBonusRollMarkers()
-    local markers = {}
-    local formats = {
-        LOOT_ITEM_BONUS_ROLL_SELF,
-        LOOT_ITEM_BONUS_ROLL_SELF_MULTIPLE,
-        LOOT_ITEM_BONUS_ROLL_OTHER,
-        LOOT_ITEM_BONUS_ROLL_OTHER_MULTIPLE,
-    }
-    for _, fmt in ipairs(formats) do
-        fmt = NormalizeLootFormat(fmt)
-        if type(fmt) == "string" and fmt ~= "" then
-            local parts = {}
-            local i = 1
-            while true do
-                local s, e = fmt:find("%%[sd]", i)
-                if not s then
-                    table.insert(parts, fmt:sub(i))
-                    break
-                end
-                if s > i then
-                    table.insert(parts, fmt:sub(i, s - 1))
-                end
-                i = e + 1
-            end
-            local best = ""
-            for _, p in ipairs(parts) do
-                local cleaned = p:gsub("[%s%p]+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-                if #cleaned > #best then
-                    best = cleaned
-                end
-            end
-            if best ~= "" then
-                table.insert(markers, string.lower(best))
-            end
-        end
-    end
-    return markers
-end
-
-local selfLootPatterns = BuildSelfLootPatterns()
-local createdLootPatterns = BuildCreatedLootPatterns()
-local otherLootPatterns = BuildOtherLootPatterns()
-local bonusRollMarkers = BuildBonusRollMarkers()
-addonTable.RecentRolls = addonTable.RecentRolls or {}
-addonTable.ConsumeRecentRollForPlayer = addonTable.ConsumeRecentRollForPlayer or function(name)
-    if not name then return nil end
-    local norm = NormalizeUnitName(name)
-    local rec = addonTable.RecentRolls and addonTable.RecentRolls[norm]
-    if not rec or not rec.time then return nil end
-    local now = GetTime and GetTime() or 0
-    if (now - rec.time) > ROLL_TRACK_WINDOW then
-        addonTable.RecentRolls[norm] = nil
-        return nil
-    end
-    addonTable.RecentRolls[norm] = nil
-    return rec.value
-end
-addonTable.RecentRollMeta = addonTable.RecentRollMeta or {}
-addonTable.ConsumeRecentRollMetaForPlayer = addonTable.ConsumeRecentRollMetaForPlayer or function(name, itemID)
-    if not name then return nil end
-    local norm = NormalizeUnitName(name)
-    local rec = addonTable.RecentRollMeta and addonTable.RecentRollMeta[norm]
-    if not rec or not rec.time then return nil end
-    local now = GetTime and GetTime() or 0
-    if (now - rec.time) > ROLL_TRACK_WINDOW then
-        addonTable.RecentRollMeta[norm] = nil
-        return nil
-    end
-    if itemID and rec.itemID and tonumber(rec.itemID) ~= tonumber(itemID) then
-        return nil
-    end
-    addonTable.RecentRollMeta[norm] = nil
-    return rec
-end
-local rollResultPattern = "^" .. (RANDOM_ROLL_RESULT or "%s rolls %d (%d-%d)"):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
-local rollFallbackPattern = "^(.-)%s+[Rr][Oo][Ll][Ll][Ss]%s+(%d+)%s+%((%d+)%-(%d+)%)"
-addonTable.BuildSystemRollChoicePatterns = addonTable.BuildSystemRollChoicePatterns or function()
-    local patterns = {}
-    local defs = {
-        { fmt = _G.LOOT_ROLL_NEED, choice = "need" },
-        { fmt = _G.LOOT_ROLL_NEED_SELF, choice = "need" },
-        { fmt = _G.LOOT_ROLL_GREED, choice = "greed" },
-        { fmt = _G.LOOT_ROLL_GREED_SELF, choice = "greed" },
-        { fmt = _G.LOOT_ROLL_PASSED, choice = "pass" },
-        { fmt = _G.LOOT_ROLL_PASSED_SELF, choice = "pass" },
-        { fmt = _G.LOOT_ROLL_WON, choice = "won", isWin = true },
-        { fmt = _G.LOOT_ROLL_WON_NO_SPAM_DE, choice = "won", isWin = true },
-        { fmt = _G.LOOT_ROLL_WON_NO_SPAM_GREED, choice = "greed", isWin = true },
-        { fmt = _G.LOOT_ROLL_WON_NO_SPAM_NEED, choice = "need", isWin = true },
-    }
-    for _, def in ipairs(defs) do
-        local fmt = NormalizeLootFormat(def.fmt)
-        if type(fmt) == "string" and fmt ~= "" then
-            local pattern = "^" .. fmt:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)") .. "$"
-            table.insert(patterns, {
-                pattern = pattern,
-                choice = def.choice,
-                isWin = def.isWin or false,
-            })
-        end
-    end
-    return patterns
-end
-addonTable.SystemRollChoicePatterns = addonTable.SystemRollChoicePatterns or addonTable.BuildSystemRollChoicePatterns()
-addonTable.ExtractRollMetaFromCaptures = addonTable.ExtractRollMetaFromCaptures or function(...)
-    local n = select("#", ...)
-    if n < 1 then return nil end
-    local playerName, itemLink, rollValue
-    for i = 1, n do
-        local value = select(i, ...)
-        if type(value) == "string" then
-            if not itemLink and value:find("|Hitem:", 1, true) then
-                itemLink = value
-            elseif not playerName and not tonumber(value) then
-                playerName = value
-            end
-            if not rollValue then
-                local asNum = tonumber(value)
-                if asNum then
-                    rollValue = asNum
-                end
-            end
-        end
-    end
-    local itemID = itemLink and tonumber(itemLink:match("item:(%d+):")) or nil
-    return playerName, itemLink, itemID, rollValue
-end
-local function ShouldTriggerOtherWon(itemID)
-    local now = GetTime and GetTime() or 0
-    if suppressOtherWonUntil and now < suppressOtherWonUntil then
-        LogAlertDebug(string.format("Suppressing other-won for item %s (multi-drop active, %.1fs remaining)", tostring(itemID), suppressOtherWonUntil - now))
-        return false
-    end
-    if not lastPlayerRollItemID or lastPlayerRollItemID ~= itemID then
-        LogAlertDebug(string.format("Other-won skip: no matching player roll for %s", tostring(itemID)))
-        return false
-    end
-    if not lastPlayerRollTime then
-        LogAlertDebug("Other-won skip: missing player roll time")
-        return false
-    end
-    if not lastAnnouncedRollItemID or lastAnnouncedRollItemID ~= itemID then
-        LogAlertDebug("Other-won skip: no announced roll for this item")
-        return false
-    end
-    if not lastAnnouncedRollTime then
-        LogAlertDebug("Other-won skip: missing announced roll time")
-        return false
-    end
-    if lastPlayerRollTime < lastAnnouncedRollTime then
-        LogAlertDebug("Other-won skip: player roll was before drop announce")
-        return false
-    end
-    local within = (GetTime() - lastPlayerRollTime) <= ROLL_TRACK_WINDOW
-    if not within then
-        LogAlertDebug("Other-won skip: roll too old")
-    end
-    return within
-end
-
-local function HandleInstanceChange(event)
-    if UpdateRaidChatFilter then
-        UpdateRaidChatFilter()
-    end
-    local inInstance, instanceType = IsInInstance()
-    local nowInRaid = IsInRaid and IsInRaid() or false
-    if nowInRaid and not lastInRaid then
-        if StatsStore then
-            -- New raid group detected; the next boss kill starts a fresh session.
-            StatsStore.forceNewSession = true
-        end
-    end
-    if lastInRaid and not nowInRaid then
-        if StatsStore then
-            StatsStore:CloseCurrentSession("left_group_or_disband")
-            StatsStore.forceNewSession = true
-        end
-    end
-    lastInRaid = nowInRaid
-    StatsStore:EnsureCurrentSession(false)
-end
-
-IsScopeAllowed = function(scope)
-    scope = scope or "ALL"
-    if scope == "ALL" then return true end
-    local inInstance, instanceType = IsInInstance()
-    if not inInstance then return false end
-    if scope == "RAID" then
-        return instanceType == "raid"
-    elseif scope == "DUNGEON" then
-        return instanceType == "party"
-    end
-    return true
-end
-
-local function ShouldShowLostAlert()
-    local settings = LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts
-    if not settings or settings.lostAlertEnabled == false then return false end
-    return IsScopeAllowed(settings.lostAlertScope)
-end
-
-local function GetRecentPlayerRollForItem(itemID)
-    if not lastPlayerRollTime then return nil end
-    local now = GetTime and GetTime() or 0
-    if (now - lastPlayerRollTime) > ROLL_TRACK_WINDOW then return nil end
-    if lastPlayerRollItemID and itemID and lastPlayerRollItemID ~= itemID then
-        return nil
-    end
-    return lastPlayerRollValue
-end
-
-local function RecentlyDropped(itemID)
-    if not itemID or not LastDropAlert[itemID] then return false end
-    local now = GetTime and GetTime() or 0
-    return (now - LastDropAlert[itemID]) <= ROLL_TRACK_WINDOW
-end
-
-local function HandleChatSystem(event, msg, ...)
-    if type(msg) ~= "string" then return end
-    if addonTable.SystemRollChoicePatterns and #addonTable.SystemRollChoicePatterns > 0 then
-        for _, entry in ipairs(addonTable.SystemRollChoicePatterns) do
-            local c1, c2, c3, c4 = msg:match(entry.pattern)
-            if c1 then
-                local playerName, itemLink, itemID, rollValue = addonTable.ExtractRollMetaFromCaptures(c1, c2, c3, c4)
-                if playerName then
-                    local normalized = NormalizeUnitName(playerName)
-                    local nowMeta = GetTime and GetTime() or 0
-                    if not itemID and lastAnnouncedRollItemID and lastAnnouncedRollTime
-                        and (nowMeta - lastAnnouncedRollTime) <= ROLL_TRACK_WINDOW then
-                        itemID = lastAnnouncedRollItemID
-                    end
-                    addonTable.RecentRollMeta[normalized] = {
-                        choice = entry.choice,
-                        isWin = entry.isWin and true or false,
-                        itemID = itemID,
-                        itemLink = itemLink,
-                        roll = rollValue,
-                        time = nowMeta,
-                    }
-                    -- Si es el roll del usuario, guardar el tipo también en lastPlayerRollChoice
-                    local playerCompare = UnitName("player")
-                    if playerCompare and NormalizeUnitName(playerCompare) == normalized then
-                        lastPlayerRollChoice = entry.choice
-                    end
-                    if rollValue then
-                        addonTable.RecentRolls[normalized] = { value = tonumber(rollValue), time = nowMeta }
-                    end
-                    if LogDebug then
-                        LogDebug(string.format("%s Roll meta detected: player=%s choice=%s win=%s item=%s roll=%s",
-                            FormatLogPrefix("Roll"),
-                            tostring(normalized),
-                            tostring(entry.choice),
-                            tostring(entry.isWin and true or false),
-                            tostring(itemID),
-                            tostring(rollValue)))
-                    end
-                end
-                break
-            end
-        end
-    end
-    local name, rollVal = msg:match(rollResultPattern)
-    if not name then
-        name, rollVal = msg:match(rollFallbackPattern)
-    end
-    if not name or not rollVal then return end
-    local playerName = UnitName("player")
-    local you = _G.YOU or "You"
-    local youCaps = _G.YOU_CAPS
-    local normalized = NormalizeUnitName(name)
-    local now = GetTime()
-    if not (name == playerName or name == you or (youCaps and name == youCaps)) then
-        addonTable.RecentRolls[normalized] = { value = tonumber(rollVal), time = now }
-        addonTable.RecentRollMeta[normalized] = addonTable.RecentRollMeta[normalized] or {}
-        addonTable.RecentRollMeta[normalized].roll = tonumber(rollVal)
-        addonTable.RecentRollMeta[normalized].time = now
-        if lastAnnouncedRollItemID then
-            addonTable.RecentRollMeta[normalized].itemID = lastAnnouncedRollItemID
-        end
-        if LogDebug then
-            LogDebug(string.format("%s Other roll detected: player=%s value=%s", FormatLogPrefix("Roll"), tostring(normalized), tostring(rollVal)))
-        end
-        return
-    end
-    lastPlayerRollValue = tonumber(rollVal)
-    lastPlayerRollTime = now
-    if lastAnnouncedRollItemID and lastAnnouncedRollTime
-        and (lastPlayerRollTime - lastAnnouncedRollTime) <= ROLL_TRACK_WINDOW then
-        lastPlayerRollItemID = lastAnnouncedRollItemID
-    else
-        lastPlayerRollItemID = nil
-    end
-    if LogDebug then
-        LogDebug(string.format("%s Player roll detected: value=%s item=%s", FormatLogPrefix("Roll"), tostring(rollVal), tostring(lastPlayerRollItemID)))
-    end
-end
-local function HandleChatLoot(event, msg, ...)
-    if not CurrentCharDB or type(msg) ~= "string" then return end
-    
-    -- Variables de localización
-    local needStr = _G.LOOT_ROLL_NEED or "Need"
-    local greedStr = _G.LOOT_ROLL_GREED or "Greed"
-    local passStr = _G.LOOT_ROLL_PASS or "Pass"
-    
-    -- Detectar NEED/GREED/PASS del usuario ("You have selected...")
-    local rollChoice = nil
-    if msg:find("You have selected " .. needStr .. " for:", 1, true) or msg:find("You have selected Need for:", 1, true) then
-        rollChoice = "need"
-        lastPlayerRollChoice = "need"
-    elseif msg:find("You have selected " .. greedStr .. " for:", 1, true) or msg:find("You have selected Greed for:", 1, true) then
-        rollChoice = "greed"
-        lastPlayerRollChoice = "greed"
-    elseif msg:find("You have selected " .. passStr .. " for:", 1, true) or msg:find("You have selected Pass for:", 1, true) then
-        rollChoice = "pass"
-        lastPlayerRollChoice = "pass"
-    elseif msg:find("You won:", 1, true) then
-        -- "You won: [item]" - NO sobrescribir el rollChoice, mantener NEED/GREED/PASS original
-    end
-    
-    -- Detectar NEED/GREED/PASS de otros jugadores ("PlayerName has selected...")
-    -- Patrón: "PlayerName has selected Need for: [item]"
-    local otherPlayerName, otherPlayerChoice = nil, nil
-    if msg:find(" has selected " .. needStr .. " for:", 1, true) or msg:find(" has selected Need for:", 1, true) then
-        otherPlayerName = msg:match("^(.+) has selected " .. needStr .. " for:")
-        if not otherPlayerName then otherPlayerName = msg:match("^(.+) has selected Need for:") end
-        otherPlayerChoice = "need"
-    elseif msg:find(" has selected " .. greedStr .. " for:", 1, true) or msg:find(" has selected Greed for:", 1, true) then
-        otherPlayerName = msg:match("^(.+) has selected " .. greedStr .. " for:")
-        if not otherPlayerName then otherPlayerName = msg:match("^(.+) has selected Greed for:") end
-        otherPlayerChoice = "greed"
-    elseif msg:find(" has selected " .. passStr .. " for:", 1, true) or msg:find(" has selected Pass for:", 1, true) then
-        otherPlayerName = msg:match("^(.+) has selected " .. passStr .. " for:")
-        if not otherPlayerName then otherPlayerName = msg:match("^(.+) has selected Pass for:") end
-        otherPlayerChoice = "pass"
-    elseif msg:find(" won:", 1, true) then
-        -- "PlayerName won: [item]"
-        otherPlayerName = msg:match("^(.+) won:")
-        if otherPlayerName then
-            local normalized = NormalizeUnitName(otherPlayerName)
-            if normalized and addonTable.RecentRollMeta and addonTable.RecentRollMeta[normalized] then
-                -- Marcar que ganó, mantener su choice anterior (need/greed)
-            end
-        end
-    end
-    
-    -- Guardar el roll de otros jugadores en RecentRollMeta
-    if otherPlayerName and otherPlayerChoice then
-        local normalized = NormalizeUnitName(otherPlayerName)
-        if normalized then
-            addonTable.RecentRollMeta[normalized] = addonTable.RecentRollMeta[normalized] or {}
-            addonTable.RecentRollMeta[normalized].choice = otherPlayerChoice
-            addonTable.RecentRollMeta[normalized].time = GetTime and GetTime() or 0
-        end
-    end
-    
-    if createdLootPatterns then
-        for _, pattern in ipairs(createdLootPatterns) do
-            if msg:match(pattern) then
-                return
-            end
-        end
-    end
-    local itemLink, playerName
-    local isMine = false
-    local lootViaBonusRoll = false
-    -- Comprueba si el jugador mismo despojó el objeto
-    for _, pattern in ipairs(selfLootPatterns) do
-        local capturedItemLink = pattern.pattern and msg:match(pattern.pattern) or nil
-        if capturedItemLink then
-            isMine = true
-            lootViaBonusRoll = pattern.isBonusRoll or false
-            itemLink = capturedItemLink
-            break
-        end
-    end
-    if not itemLink then
-        -- Comprueba si alguien más despojó el objeto
-        for _, pattern in ipairs(otherLootPatterns) do
-            local capturedPlayer, capturedItemLink2 = msg:match(pattern.pattern)
-            if capturedPlayer and capturedItemLink2 then
-                -- Si el orden viene invertido en el formato local, corrígelo usando el link del item.
-                if capturedPlayer:find("|Hitem:") and not capturedItemLink2:find("|Hitem:") then
-                    capturedPlayer, capturedItemLink2 = capturedItemLink2, capturedPlayer
-                end
-                playerName = capturedPlayer
-                itemLink = capturedItemLink2
-                isMine = (playerName == UnitName("player"))
-                lootViaBonusRoll = pattern.isBonusRoll or false
-                break
-            end
-        end
-    end
+-- Añade un item a la lista de rastreo del personaje actual
+function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
     if not itemLink then return end
-    local id = tonumber(string.match(itemLink, "item:(%d+):"))
+    local id = string.match(itemLink, "item:(%d+)")
     if not id then return end
-    if not lootViaBonusRoll and lastBonusRollItemID and id == lastBonusRollItemID then
-        local now = GetTime and GetTime() or 0
-        if (now - (lastBonusRollTime or 0)) <= 12 then
-            lootViaBonusRoll = true
-        end
-    end
-    if not lootViaBonusRoll and bonusRollMarkers and #bonusRollMarkers > 0 then
-        local msgLower = string.lower(msg)
-        for _, marker in ipairs(bonusRollMarkers) do
-            if marker ~= "" and msgLower:find(marker, 1, true) then
-                lootViaBonusRoll = true
-                break
-            end
-        end
-    end
-    if LogDebug then
-        LogDebug(string.format("%s Loot chat detected: item=%s (id=%s) source=%s player=%s tracked=%s bonus=%s",
-            FormatLogPrefix("Alert"),
-            tostring(itemLink),
-            tostring(id),
-            isMine and "self" or "other",
-            tostring(playerName or UnitName("player") or "?"),
-            tostring(CurrentCharDB and CurrentCharDB[id] and true or false),
-            tostring(lootViaBonusRoll)))
-    end
-    TriggerLootActivityTimerForItemID(id)
-    -- Log de sesión para cualquier loot (tracked o no)
-    local playerRollValue = isMine and GetRecentPlayerRollForItem(id) or nil
-    local otherRollMeta = nil
-    if not isMine and playerName then
-        playerRollValue = addonTable.ConsumeRecentRollForPlayer(playerName)
-        otherRollMeta = addonTable.ConsumeRecentRollMetaForPlayer(playerName, id)
-        if playerRollValue == nil and otherRollMeta and otherRollMeta.roll then
-            playerRollValue = tonumber(otherRollMeta.roll)
-        end
-    end
-    if not isMine and playerName and LogDebug then
-        if playerRollValue ~= nil then
-            LogDebug(string.format("%s Applied other roll to session: player=%s value=%s item=%s",
-                FormatLogPrefix("Roll"),
-                tostring(NormalizeUnitName(playerName)), tostring(playerRollValue), tostring(id)))
-        elseif otherRollMeta and (otherRollMeta.choice or otherRollMeta.isWin) then
-            LogDebug(string.format("%s Applied other roll-meta: player=%s choice=%s win=%s item=%s",
-                FormatLogPrefix("Roll"),
-                tostring(NormalizeUnitName(playerName)),
-                tostring(otherRollMeta.choice),
-                tostring(otherRollMeta.isWin and true or false),
-                tostring(id)))
-        else
-            LogDebug(string.format("%s No roll applied for other player=%s (dice icon will be check if no bonus).",
-                FormatLogPrefix("Roll"),
-                tostring(NormalizeUnitName(playerName))))
-        end
-    end
-    local skipSessionLog = tradeActive and isMine
-    if not skipSessionLog then
-        -- Determinar rollType: para otros jugadores del otherRollMeta, para el usuario desde lastPlayerRollChoice o RecentRollMeta
-        local rollTypeForSession = nil
-        if not isMine and otherRollMeta and otherRollMeta.choice then
-            rollTypeForSession = otherRollMeta.choice
-        elseif isMine then
-            -- Para el usuario, intentar obtener el tipo de roll
-            if lastPlayerRollChoice and lastPlayerRollChoice ~= "pass" then
-                rollTypeForSession = lastPlayerRollChoice
-            else
-                -- Fallback: buscar en RecentRollMeta del usuario
-                local player = UnitName("player")
-                local playerNorm = player and NormalizeUnitName(player) or nil
-                if playerNorm and addonTable.RecentRollMeta and addonTable.RecentRollMeta[playerNorm] then
-                    local myMeta = addonTable.RecentRollMeta[playerNorm]
-                    if myMeta.choice and myMeta.choice ~= "pass" then
-                        rollTypeForSession = myMeta.choice
-                    end
-                end
-            end
-        end
-        StatsStore:AddSessionLootEntry(id, itemLink, playerName or (isMine and UnitName("player")) or playerName, nil, playerRollValue, playerRollValue ~= nil, nil, lootViaBonusRoll, rollTypeForSession)
-    end
-    if CurrentCharDB[id] then
-        local itemData = CurrentCharDB[id]
-        if isMine then
-            if playerRollValue then
-                lastPlayerRollItemID = nil
-                lastPlayerRollValue = nil
-                lastPlayerRollTime = nil
-                lastPlayerRollChoice = nil
-            end
-            if itemData.status ~= 2 then
-                itemData.status = 2
-                itemData.lastState = "won"
-                StatsStore:RecordHistoryEvent("won", { itemID = id, link = itemData.link or itemData.name, boss = itemData.boss, player = UnitName("player") })
-                LootHunter_RefreshUI()
-                RemoveItemFromReminder(id)
-                local allowScope = IsScopeAllowed(LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts and LootHunterDB.settings.lootAlerts.lostAlertScope)
-                if allowScope and LootHunterDB.settings.lootAlerts.itemWon then
-                    local winTitle = CreateGradient(L["WIN_ALERT_TITLE"], 0.35, 1, 0.35, 0.65, 1, 0.65)
-                    local winDesc = CreateGradient(L["WIN_ALERT_DESC"], 0.35, 1, 0.35, 0.65, 1, 0.65)
-                    local winBanner = string.format("%s %s %s", ICON_STAR, winTitle, ICON_STAR)
-                    local itemLine = itemData.link or itemData.name or "?"
-                    EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_PRIMARY, function()
-                        if addonTable.FlashScreen then addonTable.FlashScreen("WIN") end
-                        if addonTable.ShowAlert then
-                            addonTable.ShowAlert(string.format("%s\n%s\n%s", winBanner, winDesc, itemLine), 0, 1, 0)
-                        end
-                        PlaySound(12891)
-                    end)
-                    print(string.format(L["CONGRATS_CHAT_MSG"], itemData.link))
-                    LogAlertDebug("WIN alert shown for item " .. tostring(id))
-                end
-            end
-        else
-            if itemData.status ~= 2 then
-                local viaRoll = ShouldTriggerOtherWon(id)
-                if not viaRoll and otherRollMeta then
-                    local hasChoice = (otherRollMeta.choice == "need" or otherRollMeta.choice == "greed" or otherRollMeta.choice == "won")
-                    viaRoll = (otherRollMeta.isWin == true) or hasChoice
-                end
-                local viaRecentDrop = not viaRoll and RecentlyDropped(id)
-                if viaRoll or viaRecentDrop then
-                itemData.status = 1
-                StatsStore:RecordHistoryEvent("lost", { itemID = id, link = itemData.link or itemData.name, boss = itemData.boss, player = playerName or L["UNKNOWN_SOURCE"] })
-                LootHunter_RefreshUI()
-                local allowLostAlert = ShouldShowLostAlert()
-                if allowLostAlert and LootHunterDB.settings.lootAlerts.itemSeen then
-                    -- Solo mensaje local cuando otro jugador lo obtiene; sin alerta visual/sonora.
-                    local looter = playerName or L["UNKNOWN_SOURCE"]
-                    local coloredLooter = string.format("|cffff0000%s|r", looter)
-                    local otherMsg = string.format(L["DROP_OTHER_CHAT_MSG"], itemData.link or itemData.name or "?", coloredLooter)
-                    print(otherMsg)
-                    if addonTable.ShowPreWarningFrame then
-                        EnqueueAlert(6, ALERT_PRIORITY_PRIMARY, function()
-                            addonTable.ShowPreWarningFrame(otherMsg, 6, false, true)
-                            if addonTable.PlayOtherWonSound then addonTable.PlayOtherWonSound() end
-                            if addonTable.FlashScreen then addonTable.FlashScreen("RED") end
-                        end)
-                    else
-                        if addonTable.PlayOtherWonSound then addonTable.PlayOtherWonSound() end
-                        if addonTable.FlashScreen then addonTable.FlashScreen("RED") end
-                    end
-                    LogAlertDebug(string.format("OTHER_WON alert shown for item %s (via %s)", tostring(id), viaRoll and "roll" or "recent drop"))
-                    if LogDebug then
-                        local reason = viaRoll and "roll" or "recent drop"
-                        LogDebug(string.format("%s OTHER_WON item=%s reason=%s looter=%s", FormatLogPrefix("Alert"), tostring(id), reason, tostring(playerName or "?")))
-                    end
-                    if LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.coinReminder
-                        and LootHunterDB.settings.coinReminder.enabled
-                        and IsBonusRollWindowVisible() then
-                        C_Timer.After(3, function()
-                            if not IsBonusRollWindowVisible() then return end
-                            local lostMsg = L["COIN_LOST_REMINDER"]
-                            print(lostMsg)
-                            if addonTable.ShowPreWarningFrame then
-                                EnqueueAlert(6, ALERT_PRIORITY_PREWARN, function()
-                                    addonTable.ShowPreWarningFrame(lostMsg, 6)
-                                    if COIN_LOST_SOUND_ID then
-                                        PlaySound(COIN_LOST_SOUND_ID, "Master")
-                                    end
-                                    LogAlertDebug("COIN_LOST_REMINDER alert shown for item " .. tostring(id))
-                                    C_Timer.After(6, function()
-                                        if IsBonusRollWindowVisible() then
-                                            local followMsg = L["COIN_LOST_REMINDER_FOLLOWUP"]
-                                            print(followMsg)
-                                            EnqueueAlert(6, ALERT_PRIORITY_PREWARN, function()
-                                                addonTable.ShowPreWarningFrame(followMsg, 6)
-                                                if COIN_LOST_SOUND_ID then
-                                                    PlaySound(COIN_LOST_SOUND_ID, "Master")
-                                                end
-                                                LogAlertDebug("COIN_LOST_REMINDER_FOLLOWUP alert shown for item " .. tostring(id))
-                                            end)
-                                        end
-                                    end)
-                                end)
-                            else
-                                if COIN_LOST_SOUND_ID then
-                                    PlaySound(COIN_LOST_SOUND_ID, "Master")
-                                end
-                            end
-                        end)
-                        LogCoinDebug("Bonus roll available after another player won your item.")
-                    end
-                    lastPlayerRollItemID = nil
-                    RemoveItemFromReminder(id)
-                    -- El recordatorio de moneda usa la alerta de pérdida si el bonus roll sigue activo
-                end
-                -- Auto reset tras 45s si sigue en estado drop
-                C_Timer.After(45, function()
-                    if CurrentCharDB and CurrentCharDB[id] and CurrentCharDB[id].status == 1 then
-                        CurrentCharDB[id].status = 0
-                        LootHunter_RefreshUI()
-                    end
-                end)
-                C_Timer.After(120, function()
-                    if CurrentCharDB[id] and CurrentCharDB[id].status == 1 then
-                        CurrentCharDB[id].status = 0
-                        LootHunter_RefreshUI()
-                    end
-                end)
-                end
-            end
-        end
-    end
-end
-
-local function HandleCombatLogEvent()
-    if not CombatLogGetCurrentEventInfo then return end
-    local _, subEvent, _, sourceGUID, sourceName, sourceFlags, _, destGUID, destName, destFlags = CombatLogGetCurrentEventInfo()
-    if not subEvent then return end
-    
-    local function NormalizeSimple(name)
-        if not name or name == "" then return nil end
-        if Ambiguate then return Ambiguate(name, "short") end
-        return name:match("^[^-]+") or name
-    end
-    
-    local function IsPlayerFlag(flags)
-        if not flags then return false end
-        local COMBATLOG_OBJECT_TYPE_PLAYER = _G.COMBATLOG_OBJECT_TYPE_PLAYER or 0x00000400
-        if CombatLog_Object_IsA then
-            return CombatLog_Object_IsA(flags, COMBATLOG_OBJECT_TYPE_PLAYER)
-        end
-        local band = (bit and bit.band) or (bit32 and bit32.band)
-        return band and band(flags, COMBATLOG_OBJECT_TYPE_PLAYER) > 0
-    end
-    
-    local function IsNPCFlag(flags)
-        if not flags then return false end
-        local COMBATLOG_OBJECT_TYPE_NPC = _G.COMBATLOG_OBJECT_TYPE_NPC or 0x00000800
-        if CombatLog_Object_IsA then
-            return CombatLog_Object_IsA(flags, COMBATLOG_OBJECT_TYPE_NPC)
-        end
-        local band = (bit and bit.band) or (bit32 and bit32.band)
-        return band and band(flags, COMBATLOG_OBJECT_TYPE_NPC) > 0
-    end
-    
-    local function IsBossFlag(flags)
-        if not flags then return false end
-        local COMBATLOG_OBJECT_REACTION_HOSTILE = _G.COMBATLOG_OBJECT_REACTION_HOSTILE or 2
-        if CombatLog_Object_IsA then
-            return CombatLog_Object_IsA(flags, COMBATLOG_OBJECT_REACTION_HOSTILE)
-        end
-        local band = (bit and bit.band) or (bit32 and bit32.band)
-        return band and band(flags, COMBATLOG_OBJECT_REACTION_HOSTILE) > 0
-    end
-    
-    local function IsGroupMemberName(normName)
-        if not normName or normName == "" then return false end
-        if normName == NormalizeUnitName(UnitName("player")) then return true end
-        if IsInRaid() then
-            for i = 1, GetNumGroupMembers() do
-                local unit = "raid" .. i
-                if NormalizeUnitName(UnitName(unit)) == normName then
-                    return true
-                end
-            end
-            return false
-        end
-        if IsInGroup() then
-            for i = 1, GetNumSubgroupMembers() do
-                local unit = "party" .. i
-                if NormalizeUnitName(UnitName(unit)) == normName then
-                    return true
-                end
-            end
-        end
-        return false
-    end
-    
-    local normDest = NormalizeSimple(destName)
-    local isPlayerOrMember = normDest and (IsPlayerFlag(destFlags) or IsGroupMemberName(normDest))
-    
-    if subEvent == "UNIT_DIED" then
-        if isPlayerOrMember then
-            StatsStore:AddDeath(normDest)
-        else
-            -- En raid, cualquier NPC que muera registra loot
-            local inRaid = IsInRaid and IsInRaid() or false
-            if inRaid and destName and destName ~= "" then
-                if StatsStore then
-                    StatsStore:EnsureCurrentSession(true)
-                end
-            end
-        end
-    elseif subEvent == "SPELL_RESURRECT" and isPlayerOrMember then
-        StatsStore:AddRevive(normDest)
-    end
-end
-
-local function HandleTradeShow()
-    tradeActive = true
-end
-
-local function HandleTradeClosed()
-    tradeActive = false
-end
-
-local function IsTrackableUnit(unit)
-    if not unit then return false end
-    if unit == "player" then return true end
-    if unit:match("^party%d+$") or unit:match("^raid%d+$") then return true end
-    return false
-end
-
-local function SweepDeathTimers()
-    if not StatsStore or not StatsStore.EndDeathTimer then return end
-    local function maybeEnd(unit)
-        if not unit then return end
-        if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then return end
-        local name = UnitName(unit)
-        if not name or name == "" then return end
-        name = NormalizeUnitName(name)
-        StatsStore:EndDeathTimer(name)
-    end
-    maybeEnd("player")
-    if IsInRaid and IsInRaid() then
-        local n = GetNumGroupMembers and GetNumGroupMembers() or 0
-        for i = 1, n do
-            maybeEnd("raid" .. i)
-        end
-    elseif IsInGroup and IsInGroup() then
-        local n = GetNumSubgroupMembers and GetNumSubgroupMembers() or 0
-        for i = 1, n do
-            maybeEnd("party" .. i)
-        end
-    end
-end
-
-local function HandleUnitLifeState(event, unit)
-    if IsTrackableUnit(unit) then
-        if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then return end
-        local name = UnitName(unit)
-        if not name or name == "" then return end
-        name = NormalizeUnitName(name)
-        if StatsStore and StatsStore.EndDeathTimer then
-            StatsStore:EndDeathTimer(name)
-        end
-        return
-    end
-    SweepDeathTimers()
-end
-local function PlayOtherWonSound(force)
-    if not force and not (LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts.otherWonSound) then return end
-    local originalVolume = nil
-    local volumeCVar = "Sound_SFXVolume"
-    if GetCVar and SetCVar then
-        originalVolume = tonumber(GetCVar(volumeCVar) or 1)
-        if originalVolume then
-            -- Lower SFX volume by 10% while the lament plays, then restore.
-            local target = math.max(0, math.min(originalVolume * 0.9, 1))
-            if target ~= originalVolume then
-                SetCVar(volumeCVar, target)
-                C_Timer.After(1, function()
-                    SetCVar(volumeCVar, originalVolume)
-                end)
-            end
-        end
-    end
-    local channel = "SFX"
-    local ok = PlaySoundFile(OTHER_WON_SOUND, channel)
-    if not ok then
-        PlaySoundFile(OTHER_WON_SOUND, "Master")
-    end
-end
-addonTable.PlayOtherWonSound = PlayOtherWonSound
--- Ayuda para verificar si el remitente es lider de raid o master looter en alertas de chat
-local function NormalizeName(name)
-    if not name or name == "" then return nil end
-    return Ambiguate(name, "short")
-end
-local function IsLeaderName(name)
-    local target = NormalizeName(name)
-    if not target then return false end
-    if UnitIsGroupLeader("player") and target == NormalizeName(UnitName("player")) then
-        return true
-    end
-    if IsInRaid() then
-        for i = 1, GetNumGroupMembers() do
-            local unit = "raid" .. i
-            if NormalizeName(UnitName(unit)) == target and UnitIsGroupLeader(unit) then
-                return true
-            end
-        end
-    else
-        for i = 1, GetNumSubgroupMembers() do
-            local unit = "party" .. i
-            if NormalizeName(UnitName(unit)) == target and UnitIsGroupLeader(unit) then
-                return true
-            end
-        end
-    end
-    return false
-end
-local function IsMasterLooterName(name)
-    local target = NormalizeName(name)
-    if not target then return false end
-    if not GetLootMethod then return false end
-    local method, mlParty, mlRaid = GetLootMethod()
-    if method ~= "master" then return false end
-    local unit
-    if mlRaid and mlRaid > 0 then
-        unit = "raid" .. mlRaid
-    elseif mlParty then
-        if mlParty == 0 then
-            unit = "player"
-        else
-            unit = "party" .. mlParty
-        end
-    end
-    if unit then
-        return NormalizeName(UnitName(unit)) == target
-    end
-    return false
-end
-local function IsAssistantName(name)
-    local target = NormalizeName(name)
-    if not target or not IsInGroup() then return false end
-    if IsInRaid() then
-        for i = 1, GetNumGroupMembers() do
-            local unit = "raid" .. i
-            if NormalizeName(UnitName(unit)) == target and UnitIsGroupAssistant(unit) then
-                return true
-            end
-        end
-    end
-    return false
-end
-local function IsAuthorizedAnnounce(sender)
-    return IsLeaderName(sender) or IsAssistantName(sender) or IsMasterLooterName(sender)
-end
--- Detecta cuando alguien linkea items en chat (raid/party) para disparar alerta DROP y recordatorio
-local function HandleChatLinkAnnounce(event, msg, sender, ...)
-    if not CurrentCharDB or type(msg) ~= "string" then return end
-    -- Detect disenchant announce
-    if not IsAuthorizedAnnounce(sender) then return end
-    for link in msg:gmatch("|Hitem:[-%d:]+|h.-|h") do
-        local itemID = tonumber(link:match("item:(%d+):"))
-        if itemID and CurrentCharDB[itemID] and CurrentCharDB[itemID].status == 0 then
-            ShowDropAlert(itemID, CurrentCharDB[itemID])
-            LootHunter_RefreshUI()
-        end
-        if itemID then
-            lastAnnouncedRollItemID = itemID
-            lastAnnouncedRollTime = GetTime()
-        end
-    end
-end
--- Detecta inicio de tirada Need/Greed (Group Loot en mazmorras)
-local function HandleStartLootRoll(event, rollID, rollTime)
-    if not rollID or not GetLootRollItemLink then return end
-    local link = GetLootRollItemLink(rollID)
-    if not link or not CurrentCharDB then return end
-    local id = tonumber(string.match(link, "item:(%d+):"))
-    if not id or not CurrentCharDB[id] or CurrentCharDB[id].status ~= 0 then return end
-    local itemData = CurrentCharDB[id]
-    local itemName = (itemData and itemData.name) or link or ("item:" .. tostring(id))
-    LogAlertDebug(string.format("START_LOOT_ROLL detected for pending item %d (%s)", id, itemName))
-    ShowDropAlert(id, itemData)
-    LootHunter_RefreshUI()
-    -- Marca el ítem como anunciado/rolado para habilitar alerta de loot perdido en Need/Greed (calabozos).
-    lastAnnouncedRollItemID = id
-    lastAnnouncedRollTime = GetTime()
-    lastPlayerRollItemID = id
-    lastPlayerRollTime = GetTime()
-end
-
--- Resalta en verde los objetos del vendedor según estado (lista o equipado)
-local trackedVendorColor = { 0.55, 1.0, 0.65 }
-local equippedVendorColor = { 0.2, 1.0, 0.2 }
-local merchantHooked = false
-local merchantTooltipHooked = false
-
-local function IsItemEquipped(itemID)
-    if not itemID then return false end
-    if IsEquippableItem then
-        local ok, equippable = pcall(IsEquippableItem, itemID)
-        if ok and equippable == false then
-            return false
-        end
-    end
-    if IsEquippedItem then
-        local ok, equipped = pcall(IsEquippedItem, itemID)
-        if ok and equipped then
-            return true
-        end
-    end
-    if not GetInventoryItemID then return false end
-    for slot = 1, 19 do
-        local equippedID = GetInventoryItemID("player", slot)
-        if equippedID == itemID then
-            return true
-        end
-    end
-    return false
-end
-
-local function AddTrackedInfoToMerchantTooltip(target)
-    if not GetMerchantItemLink or not GameTooltip then return end
-    local slotIndex = nil
-    if type(target) == "number" then
-        slotIndex = target
-    elseif target and target.GetID then
-        local perPage = _G.MERCHANT_ITEMS_PER_PAGE or 10
-        local page = MerchantFrame and (MerchantFrame.page or 1) or 1
-        slotIndex = ((page - 1) * perPage) + (target:GetID() or 0)
-    end
-    if not slotIndex or slotIndex <= 0 then return end
-
-    local link = GetMerchantItemLink(slotIndex)
-    local itemID = link and tonumber(link:match("item:(%d+):"))
-    if not itemID then return end
-
-    local isTracked = CurrentCharDB and CurrentCharDB[itemID]
-    local isEquipped = IsItemEquipped(itemID)
-
-    if isTracked or isEquipped then
-        local header = FormatLogPrefix("Loot Hunter")
-        if isEquipped then
-            -- Tracked AND Equipped
-            GameTooltip:AddLine(header)
-            GameTooltip:AddLine(L["VENDOR_EQUIPPED_TOOLTIP"], equippedVendorColor[1], equippedVendorColor[2], equippedVendorColor[3])
-        else
-            -- Tracked only
-            GameTooltip:AddLine(header)
-            GameTooltip:AddLine(L["VENDOR_TRACKED_TOOLTIP"], trackedVendorColor[1], trackedVendorColor[2], trackedVendorColor[3])
-        end
-        GameTooltip:Show()
-    end
-end
-
-local function HighlightTrackedMerchantItems()
-    if not MerchantFrame or not MerchantFrame:IsShown() or not GetMerchantNumItems then return end
+    id = tonumber(id)
     if not CurrentCharDB then return end
-    local perPage = _G.MERCHANT_ITEMS_PER_PAGE or 10
-    local page = MerchantFrame.page or 1
-    local offset = (page - 1) * perPage
-    for i = 1, perPage do
-        local nameText = _G["MerchantItem" .. i .. "Name"]
-        if nameText then
-            -- Guarda el color original una sola vez para restaurarlo en items no rastreados
-            if not nameText._lh_origColor then
-                local r0, g0, b0 = nameText:GetTextColor()
-                nameText._lh_origColor = { r0 or 1, g0 or 1, b0 or 1 }
-            end
-            local idx = offset + i
-            local link = GetMerchantItemLink and GetMerchantItemLink(idx)
-            local itemID = link and tonumber(link:match("item:(%d+):"))
-            local isTracked = itemID and CurrentCharDB and CurrentCharDB[itemID]
-            local isEquipped = IsItemEquipped(itemID)
-            if isEquipped then
-                nameText:SetTextColor(equippedVendorColor[1], equippedVendorColor[2], equippedVendorColor[3])
-            elseif isTracked then
-                nameText:SetTextColor(trackedVendorColor[1], trackedVendorColor[2], trackedVendorColor[3])
-            else
-                local orig = nameText._lh_origColor
-                nameText:SetTextColor(orig[1], orig[2], orig[3])
-            end
+
+    local name, _, quality = GetItemInfo(id)
+    local equipLoc         = select(9, GetItemInfo(id))
+    local icon             = select(10, GetItemInfo(id))
+    local instantEquipLoc, instantClassID, instantSubClassID = nil, nil, nil
+    if GetItemInfoInstant then
+        local _, _, _, instLoc, _, classID, subClassID = GetItemInfoInstant(itemLink)
+        instantEquipLoc   = instLoc
+        instantClassID    = classID
+        instantSubClassID = subClassID
+    end
+    if (not equipLoc or equipLoc == "") and instantEquipLoc and instantEquipLoc ~= "" then
+        equipLoc = instantEquipLoc
+    end
+
+    local isMountItem = (instantClassID == ITEM_CLASS_MISC and instantSubClassID == ITEM_SUBCLASS_MOUNT)
+    if isMountItem then equipLoc = "MOUNT" end
+
+    local journalSource = addonTable.BuildSourceFromJournal and addonTable.BuildSourceFromJournal() or nil
+    local hasValidSlot  = (equipLoc and SLOT_INFO[equipLoc] ~= nil)
+    local slotOvValid   = (slotOverride and SLOT_INFO[slotOverride] ~= nil)
+    local isEquippable  = IsEquippableItem(itemLink)
+    if not isEquippable and instantClassID then
+        if instantClassID == ITEM_CLASS_ARMOR or instantClassID == ITEM_CLASS_WEAPON then
+            isEquippable = true
         end
     end
-end
-local function HookMerchantHighlight()
-    if merchantHooked or not MerchantFrame_UpdateMerchantInfo then return end
-    merchantHooked = true
-    if hooksecurefunc then
-        hooksecurefunc("MerchantFrame_UpdateMerchantInfo", function()
-            HighlightTrackedMerchantItems()
-        end)
-    end
-    if not merchantTooltipHooked and hooksecurefunc and GameTooltip then
-        merchantTooltipHooked = true
-        hooksecurefunc(GameTooltip, "SetMerchantItem", function(tip, slot)
-            AddTrackedInfoToMerchantTooltip(slot)
-        end)
-    end
-end
-local function HandleMerchantEvent()
-    HookMerchantHighlight()
-    HighlightTrackedMerchantItems()
-end
 
--- Confirmación antes de buscar mazmorra aleatoria heroica
-local unpackCompat = (table and table.unpack) or unpack
-local heroicJoinHooked = false
-
-local HEROIC_ALERT_ICON = "|TInterface\\DialogFrame\\UI-Dialog-Icon-AlertNew:24:24:0:0|t "
-
-local function GetActiveQueueText()
-    if not GetLFGQueueStats then return nil end
-    for i = 1, 4 do
-        local ok, _, _, _, _, _, _, _, _, _, _, queueName = pcall(GetLFGQueueStats, i)
-        if ok and queueName and queueName ~= "" then
-            return queueName
+    if not slotOvValid and not hasValidSlot then
+        if isMountItem then
+            equipLoc = "MOUNT" ; hasValidSlot = true
+        elseif not isEquippable then
+            equipLoc = "RAID_TOKEN" ; hasValidSlot = true
+        elseif not equipLoc or equipLoc == "" then
+            equipLoc = "RAID_TOKEN" ; hasValidSlot = true
+        else
+            return
         end
     end
-    return nil
-end
+    if slotOvValid then equipLoc = slotOverride ; hasValidSlot = true end
+    if not equipLoc or equipLoc == "" or not SLOT_INFO[equipLoc] then equipLoc = "RAID_TOKEN" end
 
-local lastHeroicPrompt = 0
-addonTable.heroicQueueSearchLogged = addonTable.heroicQueueSearchLogged or false
+    -- Determinar fuente del item
+    local source = sourceOverride or journalSource
+    if (not source or source == "" or source == L["UNKNOWN_SOURCE"]) and MerchantFrame and MerchantFrame:IsShown() then
+        local vendorName = UnitName("npc") or UnitName("target") or L["UNKNOWN_SOURCE"]
+        source = (vendorName and vendorName ~= "") and (vendorName .. " (Vendor)") or "Vendor"
+    end
 
-local function PromptHeroicQueueIfNeeded(force)
-    if not (LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.misc and LootHunterDB.settings.misc.heroicQueueConfirm ~= false) then
-        return
+    -- Detectar dificultad heroica
+    local ejDifficulty = nil
+    if EncounterJournal and EncounterJournal:IsShown() and EJ_GetDifficulty then
+        ejDifficulty = EJ_GetDifficulty()
     end
-    local text = GetActiveQueueText()
-    if not text or text == "" then
-        lastHeroicConfirmedText = nil
-        addonTable.heroicQueueSearchLogged = false
-        return
-    end
-    if not addonTable.heroicQueueSearchLogged then
-        HeroicLog(string.format("Queue text=%s", tostring(text)))
-        addonTable.heroicQueueSearchLogged = true
-    end
-    if text == lastHeroicConfirmedText then
-        return
-    end
-    local lower = string.lower(text)
-    if not (lower:find("heroic", 1, true) or lower:find("heroico", 1, true)) then return end
-    local now = GetTime and GetTime() or 0
-    if not force and now - (lastHeroicPrompt or 0) < 1 then return end
-    if heroPopupShown then return end
-    lastHeroicPrompt = now
-    if not EnsureHeroicQueuePopup then
-        -- fallback inline creator if not yet defined
-        EnsureHeroicQueuePopup = function()
-            if not StaticPopupDialogs then return end
-            StaticPopupDialogs["LOOTHUNTER_CONFIRM_HEROIC_QUEUE"] = StaticPopupDialogs["LOOTHUNTER_CONFIRM_HEROIC_QUEUE"] or {
-                text = "You are already queued for a heroic random dungeon. Continue?",
-                button1 = "Yes, continue",
-                button2 = "No, cancel queue",
-                timeout = 0,
-                whileDead = 1,
-                hideOnEscape = 1,
-                preferredIndex = STATICPOPUP_NUMDIALOGS,
-            }
+    source = source or L["UNKNOWN_SOURCE"]
+
+    local plainLink = itemLink:match("|H(item:.-)|h") or itemLink
+    local isHeroic  = addonTable.IsHeroicItem and addonTable.IsHeroicItem(plainLink, source, ejDifficulty) or false
+    itemLink        = plainLink
+
+    local resolvedSpec   = addonTable.ResolveSpecName and addonTable.ResolveSpecName(spec)   or spec
+    local resolvedSpecID = addonTable.ResolveSpecID   and addonTable.ResolveSpecID(spec)     or nil
+
+    if not CurrentCharDB[id] then
+        -- Item nuevo: crear entrada completa
+        CurrentCharDB[id] = {
+            name     = name or L["LOADING"],
+            link     = itemLink,
+            slot     = equipLoc,
+            icon     = icon,
+            boss     = source,
+            bisType  = bisType,
+            spec     = resolvedSpec,
+            specID   = resolvedSpecID,
+            isHeroic = isHeroic,
+            status   = 0,
+        }
+        local displayName = name or L["LOADING"]
+        if quality and GetItemQualityColor and name then
+            local color = select(4, GetItemQualityColor(quality))
+            if color then displayName = string.format("|c%s%s|r", color, name) end
+        end
+        print(string.format(L["ADDED_MSG"], id, displayName))
+        if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+        if MerchantFrame and MerchantFrame:IsShown() and addonTable.HighlightTrackedMerchantItems then
+            addonTable.HighlightTrackedMerchantItems()
+        end
+        if addonTable.MaybeRefreshJournalBoss then addonTable.MaybeRefreshJournalBoss(id) end
+    else
+        -- Item existente: actualizar campos faltantes
+        local entry = CurrentCharDB[id]
+        if bisType then entry.bisType = bisType end
+        if resolvedSpecID and not entry.specID then entry.specID = resolvedSpecID end
+        if resolvedSpec and (not entry.spec or entry.spec == "") then
+            entry.spec = resolvedSpec
+        elseif spec then
+            entry.spec = spec
+        end
+        if sourceOverride then entry.boss = sourceOverride end
+        if (not entry.boss or entry.boss == L["UNKNOWN_SOURCE"]) and source then entry.boss = source end
+        entry.isHeroic = isHeroic
+        if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+        if MerchantFrame and MerchantFrame:IsShown() and addonTable.HighlightTrackedMerchantItems then
+            addonTable.HighlightTrackedMerchantItems()
         end
     end
-    EnsureHeroicQueuePopup()
-    local dialog = StaticPopupDialogs and StaticPopupDialogs["LOOTHUNTER_CONFIRM_HEROIC_QUEUE"]
-    if dialog then
-        dialog.text = HEROIC_ALERT_ICON .. (L["HEROIC_QUEUE_ALREADY"] or "You are already queued for a heroic random dungeon. Continue?")
-        dialog.button1 = L["HEROIC_QUEUE_CONFIRM_YES"] or "Yes, continue"
-        dialog.button2 = L["HEROIC_QUEUE_CONFIRM_NO"] or "No, cancel queue"
-        dialog.OnAccept = function()
-            lastHeroicConfirmedText = text
-            lastHeroicConfirmedAt = now
-            heroPopupShown = false
-        end
-        dialog.OnCancel = function()
-            heroPopupShown = false
-            lastHeroicConfirmedText = nil
-            SafeLeaveLFG()
-        end
-        heroPopupShown = true
-        HeroicLog("Showing heroic queue confirmation popup")
-        StaticPopup_Show("LOOTHUNTER_CONFIRM_HEROIC_QUEUE")
+
+    -- Si la fuente sigue siendo desconocida, intentar resolverla vía EJ
+    if CurrentCharDB[id] and (not CurrentCharDB[id].boss or CurrentCharDB[id].boss == L["UNKNOWN_SOURCE"]) then
+        if addonTable.TryResolveSourceAsync then addonTable.TryResolveSourceAsync(id) end
     end
 end
 
-local function ScheduleHeroicQueueCheck()
-    if not C_Timer or not C_Timer.After then return end
-    C_Timer.After(0.1, PromptHeroicQueueIfNeeded)
-    C_Timer.After(0.4, PromptHeroicQueueIfNeeded)
-    C_Timer.After(1.0, PromptHeroicQueueIfNeeded)
-    C_Timer.After(2.0, function() PromptHeroicQueueIfNeeded(true) end)
+-- Parsea un argumento de slash command: puede ser itemLink o itemID numérico
+function addonTable.ParseItemArg(arg)
+    if not arg or arg == "" then return nil, nil end
+    local link = arg:match("|Hitem:.-|h.-|h") or arg
+    local id   = tonumber(link:match("item:(%d+)")) or tonumber(link)
+    return id, link
 end
 
-local function EnsureHeroicQueuePopup()
-    if not StaticPopupDialogs then return end
-    StaticPopupDialogs["LOOTHUNTER_CONFIRM_HEROIC_QUEUE"] = StaticPopupDialogs["LOOTHUNTER_CONFIRM_HEROIC_QUEUE"] or {
-        text = HEROIC_ALERT_ICON .. (L["HEROIC_QUEUE_CONFIRM_TEXT"] or "You are about to queue for a heroic random dungeon. Continue?"),
-        button1 = L["HEROIC_QUEUE_CONFIRM_YES"] or YES or "Yes",
-        button2 = L["HEROIC_QUEUE_CONFIRM_NO"] or CANCEL or "Cancel",
-        timeout = 0,
-        whileDead = 1,
-        hideOnEscape = 1,
-        preferredIndex = STATICPOPUP_NUMDIALOGS,
+-- Asegura que exista una entrada para un item en la DB del personaje
+function addonTable.EnsureItemEntry(itemID, itemLink)
+    if not itemID then return nil end
+    if CurrentCharDB and CurrentCharDB[itemID] then return CurrentCharDB[itemID] end
+    local name, resolvedLink, quality = GetItemInfo(itemID)
+    local displayName = name or L["LOADING"]
+    if quality and GetItemQualityColor and name then
+        local color = select(4, GetItemQualityColor(quality))
+        if color then displayName = string.format("|c%s%s|r", color, name) end
+    end
+    CurrentCharDB[itemID] = {
+        name     = displayName,
+        link     = resolvedLink or itemLink or displayName,
+        slot     = "RAID_TOKEN",
+        icon     = select(10, GetItemInfo(itemID)),
+        boss     = L["UNKNOWN_SOURCE"],
+        bisType  = nil,
+        spec     = addonTable.ResolveSpecName and addonTable.ResolveSpecName() or nil,
+        specID   = addonTable.ResolveSpecID   and addonTable.ResolveSpecID()   or nil,
+        isHeroic = false,
+        status   = 0,
     }
+    return CurrentCharDB[itemID]
 end
 
-local dropdownButtonsHooked = false
-local function HookLFDTypeDropdownButtons()
-    if dropdownButtonsHooked or not hooksecurefunc then return end
-    dropdownButtonsHooked = true
-    hooksecurefunc("ToggleDropDownMenu", function(_, _, dropdownFrame)
-        if dropdownFrame ~= _G.LFDQueueFrameTypeDropDown then return end
-        -- Limpiar valores previos al abrir
-        currentRandomDungeonName = nil
-        currentRandomDungeonID = nil
-        local maxLevels = _G.UIDROPDOWNMENU_MAXLEVELS or 2
-        local maxButtons = _G.UIDROPDOWNMENU_MAXBUTTONS or 10
-        for level = 1, maxLevels do
-            local list = _G["DropDownList" .. level]
-            if list then
-                for i = 1, maxButtons do
-                    local btn = _G["DropDownList" .. level .. "Button" .. i]
-                    if btn and btn:IsShown() and btn:GetParent() == list then
-                        if not btn._lh_hooked then
-                            btn._lh_hooked = true
-                            btn:HookScript("OnClick", function(self)
-                                local text = self.GetText and self:GetText()
-                                local value = self.value
-                                currentRandomDungeonID = value
-                                currentRandomDungeonName = text
-                                HeroicLog(string.format("Captured via dropdown button: value=%s text=%s", tostring(value), tostring(text)))
-                            end)
-                        end
-                    end
-                end
-            end
-        end
-    end)
-end
+-- =============================================================
+-- REGISTRO DE EVENTOS
+-- =============================================================
 
-SetupHeroicQueueConfirm = function()
-    if heroicJoinHooked then return end
-    if not LFDQueueFrame_Join then
-        HeroicLog("LFDQueueFrame_Join not available, cannot hook yet")
-        return
-    end
-    heroicJoinHooked = true
-    HeroicLog("Hooking LFDQueueFrame_Join for confirmation")
-
-    -- Cache del último ID leído para fines de log (no se usa como fuente de decisión)
-    if hooksecurefunc and LFDQueueFrameRandom_SetDungeonID then
-        hooksecurefunc("LFDQueueFrameRandom_SetDungeonID", function(id)
-            if id then
-                currentRandomDungeonID = id
-                currentRandomDungeonName = nil
-                HeroicLog(string.format("Captured random dungeon ID via Random_SetDungeonID: %s", tostring(currentRandomDungeonID)))
-            end
-        end)
-    end
-    if hooksecurefunc and LFDQueueFrame_SetType then
-        hooksecurefunc("LFDQueueFrame_SetType", function(id, typeID)
-            if id then
-                local dungeonID = (type(id) == "number") and id or nil
-                currentRandomDungeonID = dungeonID or id
-                local n = (dungeonID and GetLFGDungeonInfo and select(1, GetLFGDungeonInfo(dungeonID))) or nil
-                currentRandomDungeonName = n or nil
-                HeroicLog(string.format("SetType: id=%s name=%s typeID=%s", tostring(id), tostring(currentRandomDungeonName), tostring(typeID)))
-            end
-        end)
-    end
-    if hooksecurefunc and UIDropDownMenu_SetSelectedValue then
-        hooksecurefunc("UIDropDownMenu_SetSelectedValue", function(frame, value)
-            if frame == _G.LFDQueueFrameTypeDropDown then
-                currentRandomDungeonID = value
-                local n = (type(value) == "number" and GetLFGDungeonInfo and select(1, GetLFGDungeonInfo(value))) or nil
-                currentRandomDungeonName = n or nil
-                HeroicLog(string.format("SetSelectedValue for LFD type: %s (name=%s)", tostring(value), tostring(currentRandomDungeonName)))
-            end
-        end)
-    end
-    if hooksecurefunc and UIDropDownMenu_SetSelectedID then
-        hooksecurefunc("UIDropDownMenu_SetSelectedID", function(frame, id)
-            if frame == _G.LFDQueueFrameTypeDropDown then
-                local val = UIDropDownMenu_GetSelectedValue(frame)
-                currentRandomDungeonID = val or id
-                local n = (type(currentRandomDungeonID) == "number" and GetLFGDungeonInfo and select(1, GetLFGDungeonInfo(currentRandomDungeonID))) or nil
-                currentRandomDungeonName = n or nil
-                HeroicLog(string.format("SetSelectedID for LFD type: id=%s val=%s name=%s", tostring(id), tostring(val), tostring(currentRandomDungeonName)))
-            end
-        end)
-    end
-    if hooksecurefunc and _G.UIDropDownMenuButton_OnClick then
-        hooksecurefunc("UIDropDownMenuButton_OnClick", function(self)
-            local parentList = self and self:GetParent()
-            if not parentList then return end
-            local dropdown = parentList.dropdown
-            if dropdown == _G.LFDQueueFrameTypeDropDown then
-                local text = (self.GetText and self:GetText())
-                    or (self:GetFontString() and self:GetFontString():GetText())
-                    or (self.normalText and self.normalText:GetText())
-                    or (type(self.value) == "number" and GetLFGDungeonInfo and select(1, GetLFGDungeonInfo(self.value)))
-                    or (type(self.value) == "table" and self.value.name)
-                    or nil
-                local value = self.value
-                currentRandomDungeonID = value
-                currentRandomDungeonName = text
-                HeroicLog(string.format("Captured via Button_OnClick: value=%s text=%s", tostring(value), tostring(text)))
-            end
-        end)
-    end
-    HookLFDTypeDropdownButtons()
-
-    if hooksecurefunc then
-        hooksecurefunc("LFDQueueFrame_Join", function()
-            HeroicLog("LFDQueueFrame_Join invoked")
-            ScheduleHeroicQueueCheck()
-        end)
-    end
-end
-
-local function HandleLFGQueueUpdate()
-    ScheduleHeroicQueueCheck()
-end
-
+-- Tabla que mapea eventos WoW a su manejador.
+-- Los módulos exponen sus manejadores vía addonTable antes de que
+-- LootHunter.lua termine de cargar gracias al orden del TOC.
 local eventHandlers = {
-    ADDON_LOADED = HandleAddonLoaded,
-    GET_ITEM_INFO_RECEIVED = HandleInfoUpdate,
-    PLAYER_EQUIPMENT_CHANGED = HandleInfoUpdate,
-    LOOT_READY = HandleLootEvent,
-    LOOT_OPENED = HandleLootEvent,
-    BONUS_ROLL_ACTIVATE = HandleBonusRollActivate,
-    BONUS_ROLL_RESULT = HandleBonusRollResult,
-    UNIT_AURA = HandleUnitAura,
-    BOSS_KILL = HandleBossKill,
-    ENCOUNTER_END = HandleEncounterEnd,
-    CHAT_MSG_LOOT = HandleChatLoot,
-    CHAT_MSG_SYSTEM = HandleChatSystem,
-    CHAT_MSG_RAID = HandleChatLinkAnnounce,
-    CHAT_MSG_RAID_LEADER = HandleChatLinkAnnounce,
-    CHAT_MSG_RAID_WARNING = HandleChatLinkAnnounce,
-    CHAT_MSG_PARTY = HandleChatLinkAnnounce,
-    CHAT_MSG_PARTY_LEADER = HandleChatLinkAnnounce,
-    START_LOOT_ROLL = HandleStartLootRoll,
-    COMBAT_LOG_EVENT_UNFILTERED = HandleCombatLogEvent,
-    UNIT_HEALTH = HandleUnitLifeState,
-    UNIT_FLAGS = HandleUnitLifeState,
-    TRADE_SHOW = HandleTradeShow,
-    TRADE_CLOSED = HandleTradeClosed,
-    PLAYER_SPECIALIZATION_CHANGED = HandleSpecChange,
-    ACTIVE_TALENT_GROUP_CHANGED = HandleSpecChange,
-    PLAYER_TALENT_UPDATE = HandleSpecChange,
-    GROUP_ROSTER_UPDATE = HandleInstanceChange,
-    MERCHANT_SHOW = HandleMerchantEvent,
-    MERCHANT_UPDATE = HandleMerchantEvent,
-    PLAYER_ENTERING_WORLD = HandleInstanceChange,
-    ZONE_CHANGED_NEW_AREA = HandleInstanceChange,
-    LFG_QUEUE_STATUS_UPDATE = HandleLFGQueueUpdate,
-    LFG_UPDATE = HandleLFGQueueUpdate,
-    LFG_PROPOSAL_SHOW = HandleLFGQueueUpdate,
+    ADDON_LOADED                = HandleAddonLoaded,
+    GET_ITEM_INFO_RECEIVED      = HandleInfoUpdate,
+    PLAYER_EQUIPMENT_CHANGED    = HandleInfoUpdate,
+    LOOT_READY                  = HandleLootEvent,
+    LOOT_OPENED                 = HandleLootEvent,
+    BONUS_ROLL_ACTIVATE         = function(...) if addonTable.HandleBonusRollActivate then addonTable.HandleBonusRollActivate(...) end end,
+    BONUS_ROLL_RESULT           = function(...) if addonTable.HandleBonusRollResult   then addonTable.HandleBonusRollResult(...)   end end,
+    UNIT_AURA                   = function(...) if addonTable.HandleUnitAura          then addonTable.HandleUnitAura(...)          end end,
+    BOSS_KILL                   = HandleBossKill,
+    ENCOUNTER_END               = HandleEncounterEnd,
+    CHAT_MSG_LOOT               = function(...) if addonTable.HandleChatLoot          then addonTable.HandleChatLoot(...)          end end,
+    CHAT_MSG_SYSTEM             = function(...) if addonTable.HandleChatSystem         then addonTable.HandleChatSystem(...)        end end,
+    CHAT_MSG_RAID               = function(...) if addonTable.HandleChatLinkAnnounce  then addonTable.HandleChatLinkAnnounce(...)  end end,
+    CHAT_MSG_RAID_LEADER        = function(...) if addonTable.HandleChatLinkAnnounce  then addonTable.HandleChatLinkAnnounce(...)  end end,
+    CHAT_MSG_RAID_WARNING       = function(...) if addonTable.HandleChatLinkAnnounce  then addonTable.HandleChatLinkAnnounce(...)  end end,
+    CHAT_MSG_PARTY              = function(...) if addonTable.HandleChatLinkAnnounce  then addonTable.HandleChatLinkAnnounce(...)  end end,
+    CHAT_MSG_PARTY_LEADER       = function(...) if addonTable.HandleChatLinkAnnounce  then addonTable.HandleChatLinkAnnounce(...)  end end,
+    START_LOOT_ROLL             = function(...) if addonTable.HandleStartLootRoll      then addonTable.HandleStartLootRoll(...)     end end,
+    COMBAT_LOG_EVENT_UNFILTERED = function(...) if addonTable.HandleCombatLogEvent    then addonTable.HandleCombatLogEvent(...)    end end,
+    UNIT_HEALTH                 = function(...) if addonTable.HandleUnitLifeState      then addonTable.HandleUnitLifeState(...)     end end,
+    UNIT_FLAGS                  = function(...) if addonTable.HandleUnitLifeState      then addonTable.HandleUnitLifeState(...)     end end,
+    TRADE_SHOW                  = function(...) if addonTable.HandleTradeShow          then addonTable.HandleTradeShow(...)         end end,
+    TRADE_CLOSED                = function(...) if addonTable.HandleTradeClosed        then addonTable.HandleTradeClosed(...)       end end,
+    PLAYER_SPECIALIZATION_CHANGED = function(...) if addonTable.HandleSpecChange       then addonTable.HandleSpecChange(...)        end end,
+    ACTIVE_TALENT_GROUP_CHANGED = function(...) if addonTable.HandleSpecChange         then addonTable.HandleSpecChange(...)        end end,
+    PLAYER_TALENT_UPDATE        = function(...) if addonTable.HandleSpecChange         then addonTable.HandleSpecChange(...)        end end,
+    GROUP_ROSTER_UPDATE         = function(...) if addonTable.HandleInstanceChange     then addonTable.HandleInstanceChange(...)    end end,
+    MERCHANT_SHOW               = function(...) if addonTable.HandleMerchantEvent      then addonTable.HandleMerchantEvent(...)     end end,
+    MERCHANT_UPDATE             = function(...) if addonTable.HandleMerchantEvent      then addonTable.HandleMerchantEvent(...)     end end,
+    PLAYER_ENTERING_WORLD       = function(...) if addonTable.HandleInstanceChange     then addonTable.HandleInstanceChange(...)    end end,
+    ZONE_CHANGED_NEW_AREA       = function(...) if addonTable.HandleInstanceChange     then addonTable.HandleInstanceChange(...)    end end,
+    LFG_QUEUE_STATUS_UPDATE     = function(...) if addonTable.HandleLFGQueueUpdate     then addonTable.HandleLFGQueueUpdate(...)    end end,
+    LFG_UPDATE                  = function(...) if addonTable.HandleLFGQueueUpdate     then addonTable.HandleLFGQueueUpdate(...)    end end,
+    LFG_PROPOSAL_SHOW           = function(...) if addonTable.HandleLFGQueueUpdate     then addonTable.HandleLFGQueueUpdate(...)    end end,
 }
+
 frame:SetScript("OnEvent", function(self, event, arg1, ...)
     if eventHandlers[event] then
         eventHandlers[event](event, arg1, ...)
     end
 end)
+
+-- Registrar todos los eventos
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("CHAT_MSG_LOOT")
 frame:RegisterEvent("CHAT_MSG_SYSTEM")
@@ -3383,440 +635,38 @@ frame:RegisterEvent("TRADE_CLOSED")
 frame:RegisterEvent("LFG_QUEUE_STATUS_UPDATE")
 frame:RegisterEvent("LFG_UPDATE")
 frame:RegisterEvent("LFG_PROPOSAL_SHOW")
--- === CACHE DE LOOT (EJ) ===
-local LootSourceCache = {}
-local StaticDBBuilt = false
-local function BuildSourceFromJournal()
-    if not EncounterJournal or not EncounterJournal:IsShown() then return nil end
-    local instanceName, encounterName
-    if EncounterJournal.instanceID then
-        instanceName = EJ_GetInstanceInfo(EncounterJournal.instanceID)
-    end
-    if EncounterJournal.encounterID then
-        encounterName = EJ_GetEncounterInfo(EncounterJournal.encounterID)
-    end
-    if instanceName and encounterName then
-        return instanceName .. " - " .. encounterName
-    elseif encounterName then
-        return encounterName
-    elseif instanceName then
-        return instanceName .. " " .. L["ZONE_DROP"]
-    end
-    return nil
-end
-local function MaybeRefreshJournalBoss(id)
-    if not CurrentCharDB or not EncounterJournal or not EncounterJournal:IsShown() then return end
-    local entry = CurrentCharDB[id]
-    if not entry then return end
-    local currentSource = entry.boss or ""
-    if currentSource ~= "" and currentSource ~= L["UNKNOWN_SOURCE"] and not string.find(currentSource, L["ZONE_DROP"], 1, true) then
-        return
-    end
-    local attempts = 0
-    local function try()
-        if not CurrentCharDB or not EncounterJournal or not EncounterJournal:IsShown() then return end
-        local source = BuildSourceFromJournal()
-        if source and source ~= "" and source ~= L["UNKNOWN_SOURCE"] and not string.find(source, L["ZONE_DROP"], 1, true) then
-            entry.boss = source
-            LootHunter_RefreshUI()
-            return
-        end
-        attempts = attempts + 1
-        if attempts < 4 then
-            C_Timer.After(0.35, try)
-        end
-    end
-    try()
-end
--- Detecta flag heroico desde link/contexto; usado en alta y UI.
-local function IsHeroicItem(itemLink, source, ejDifficulty)
-    if not itemLink or itemLink == "" then return false end
-    local plainLink = itemLink:match("|H(item:.-)|h") or itemLink
-    local parts = { strsplit(":", plainLink) }
-    local difficultyCandidates = {
-        tonumber(parts[12]),
-        tonumber(parts[13]),
-        tonumber(parts[15]),
-        tonumber(parts[16]),
-    }
-    local heroicDifficulty = false
-    for _, diffID in ipairs(difficultyCandidates) do
-        if diffID and (diffID == 5 or diffID == 6 or diffID == 16 or diffID == 148 or diffID == 149 or (diffID >= 175 and diffID <= 177)) then
-            heroicDifficulty = true
-            break
-        end
-    end
-    local suffixID = tonumber(parts[8])
-    local isHeroicFromSource = source and (string.find(string.lower(source), "%(h%)") or string.find(string.lower(source), "heroic"))
-    local ejIsHeroic = ejDifficulty and (ejDifficulty == 5 or ejDifficulty == 6 or ejDifficulty == 16)
-    -- Heroico si la dificultad es heroica, el link tiene sufijo heroico, la fuente lo indica o el EJ es heroico (desde EJ).
-    local isHeroic = heroicDifficulty or (suffixID and suffixID > 0) or isHeroicFromSource or ejIsHeroic
-    return isHeroic and true or false
-end
-addonTable.IsHeroicItem = IsHeroicItem
-local EJUnavailable = false
-local EJUnavailableLogged = false
--- Resolver fuente directamente desde el Encounter Journal (sin DB estatica)
-local function EnsureEJLoaded()
-    if EJUnavailable then return false end
-    if EJ_GetNumInstances or EJ_GetLootInfoByItemID or (C_EncounterJournal and (C_EncounterJournal.GetLootInfoByItemID or C_EncounterJournal.GetLootInfo)) then
-        return true
-    end
-    -- Intentar cargar via UIParentLoadAddOn (carga perezosa del EJ)
-    if UIParentLoadAddOn then
-        local loaded = UIParentLoadAddOn('Blizzard_EncounterJournal')
-        if loaded and (EJ_GetNumInstances or EJ_GetLootInfoByItemID or (C_EncounterJournal and (C_EncounterJournal.GetLootInfoByItemID or C_EncounterJournal.GetLootInfo))) then
-            return true
-        end
-    end
-    -- Respaldo a LoadAddOn
-    if not IsAddOnLoaded('Blizzard_EncounterJournal') then
-        local loaded = LoadAddOn('Blizzard_EncounterJournal')
-        if loaded and (EJ_GetNumInstances or EJ_GetLootInfoByItemID or (C_EncounterJournal and (C_EncounterJournal.GetLootInfoByItemID or C_EncounterJournal.GetLootInfo))) then
-            return true
-        end
-    end
-    EJUnavailable = true
-    if LogDebug and not EJUnavailableLogged then
-        LogDebug(FormatLogPrefix("EJ") .. " Encounter Journal no disponible; omitiendo resolución hasta /reload")
-        EJUnavailableLogged = true
-    end
-    return false
-end
-local function ResolveSourceFromEJ(itemID)
-    if not itemID or type(itemID) ~= 'number' then return nil end
-    if not EnsureEJLoaded() then
-        return nil, "EJ_UNAVAILABLE"
-    end
-    -- Seleccionar tier de Pandaria si es posible (mejora resultados en MoP)
-    if EJ_SelectTier and EJ_GetNumTiers then
-        if not MOPTierSelected then
-            local numTiers = EJ_GetNumTiers() or 0
-            local selected = false
-            for i = 1, numTiers do
-                local name = EJ_GetTierInfo and EJ_GetTierInfo(i) or ""
-                if name and string.find(string.lower(name), "pandaria") then
-                    EJ_SelectTier(i)
-                    selected = true
-                    break
-                end
-            end
-            if not selected then
-                -- fallback hardcodeado a la expansión MoP (índice habitual 5)
-                EJ_SelectTier(5)
-            end
-            MOPTierSelected = true
-        end
-    end
-    -- Intento directo: EJ_GetLootInfoByItemID (o equivalente en C_EncounterJournal)
-    local lootFunc = EJ_GetLootInfoByItemID or (C_EncounterJournal and (C_EncounterJournal.GetLootInfoByItemID or C_EncounterJournal.GetLootInfo))
-    local encounterFunc = EJ_GetEncounterInfo or (C_EncounterJournal and (C_EncounterJournal.GetEncounterInfo or C_EncounterJournal.GetEncounterInfoByIndex))
-    local instanceInfoFunc = EJ_GetInstanceInfo or (C_EncounterJournal and C_EncounterJournal.GetInstanceInfo)
-    if lootFunc and encounterFunc then
-        local name, _, _, _, _, encounterID, instanceID = lootFunc(itemID)
-        if encounterID then
-            local bossName, _, _, instFromBoss = encounterFunc(encounterID)
-            local instID = instFromBoss or instanceID
-            local instanceName = instanceInfoFunc and (instID and instanceInfoFunc(instID) or (instanceID and instanceInfoFunc(instanceID))) or nil
-            if instanceName and bossName then
-                if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " Resuelta fuente (directo) para item " .. itemID .. ": " .. instanceName .. " - " .. bossName) end
-                return instanceName .. " - " .. bossName
-            end
-            if bossName or instanceName then
-                if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " Resuelta fuente (directo) para item " .. itemID .. ": " .. (bossName or instanceName)) end
-                return bossName or instanceName
-            end
-        end
-    end
-    local numInstances = (EJ_GetNumInstances and EJ_GetNumInstances()) or 0
-    for i = 1, numInstances do
-        local instID = EJ_GetInstanceByIndex(i, false)
-        if instID then
-            EJ_SelectInstance(instID)
-            local instName = EJ_GetInstanceInfo(instID)
-            local bossIndex = 1
-            while true do
-                local bossName, _, bossID = EJ_GetEncounterInfoByIndex(bossIndex, instID)
-                if not bossName then break end
-                EJ_SelectEncounter(bossID)
-                local lootIndex = 1
-                while true do
-                    local info = EJ_GetLootInfoByIndex(lootIndex)
-                    if not info then break end
-                    if info.itemID == itemID then
-                        if instName and bossName then
-                            if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " Resuelta fuente para item " .. itemID .. ": " .. instName .. " - " .. bossName) end
-                            return instName .. ' - ' .. bossName
-                        end
-                        if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " Resuelta fuente para item " .. itemID .. ": " .. (bossName or instName or "??")) end
-                        return bossName or instName
-                    end
-                    lootIndex = lootIndex + 1
-                end
-                bossIndex = bossIndex + 1
-            end
-        end
-    end
-    return nil
-end
-local function TryResolveSourceAsync(itemID)
-    if not itemID then return end
-    if EJUnavailable then return end
-    RequestItemData(itemID)
-    C_Timer.After(0, function()
-        if not CurrentCharDB then return end
-        if EJUnavailable then return end
-        local entry = CurrentCharDB[itemID]
-        if not entry or (entry.boss and entry.boss ~= '' and entry.boss ~= L['UNKNOWN_SOURCE']) then return end
-        if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " Intentando resolver fuente via EJ para item " .. tostring(itemID)) end
-        local src, errFlag = ResolveSourceFromEJ(itemID)
-        if errFlag == "EJ_UNAVAILABLE" then
-            EJUnavailable = true
-            return
-        end
-        if src and src ~= '' then
-            entry.boss = src
-            LootHunter_RefreshUI()
-            if addonTable.RefreshLogPanel then addonTable.RefreshLogPanel() end
-        else
-            if LogDebug then LogDebug(FormatLogPrefix("EJ") .. " No se encontró fuente para item " .. tostring(itemID) .. " en EJ") end
-        end
-    end)
-end
-local function ResolveAllUnknownSources()
-    if not CurrentCharDB then return end
-    local pending = {}
-    for id, data in pairs(CurrentCharDB) do
-        if type(id) == "number" and type(data) == "table" then
-            local boss = data.boss
-            if not boss or boss == "" or boss == L["UNKNOWN_SOURCE"] then
-                pending[#pending+1] = id
-            end
-        end
-    end
-    if #pending == 0 then return end
-    -- Precargar datos de item para mejorar respuestas de EJ
-    for _, itemID in ipairs(pending) do
-        RequestItemData(itemID)
-    end
-    -- Dar tiempo al cliente a traer datos antes de resolver
-    local delay = 0.6
-    C_Timer.After(delay, function()
-        if EJUnavailable then return end
-        for index, itemID in ipairs(pending) do
-            C_Timer.After(0.05 * (index-1), function()
-                TryResolveSourceAsync(itemID)
-            end)
-        end
-    end)
-end
-local function _BuildStaticDB()
-    -- Deshabilitado: ya no usamos bases de datos estáticas
-    StaticDBBuilt = true
-end
-BuildStaticDB = _BuildStaticDB
--- Función para obtener información del item desde la cache
-function addonTable.GetItemSourceFromCache(itemID)
-    if LootSourceCache[itemID] then
-        return LootSourceCache[itemID]
-    end
-    return nil
-end
-function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
-    if not itemLink then return end
-    local id = string.match(itemLink, "item:(%d+)")
-    if not id then return end
-    id = tonumber(id)
-    if not CurrentCharDB then return end 
-    local name, _, quality = GetItemInfo(id)
-    local equipLoc = select(9, GetItemInfo(id))
-    local icon = select(10, GetItemInfo(id))
-    local instantEquipLoc, instantClassID, instantSubClassID = nil, nil, nil
-    if GetItemInfoInstant then
-        local _, _, _, instLoc, _, classID, subClassID = GetItemInfoInstant(itemLink)
-        instantEquipLoc = instLoc
-        instantClassID = classID
-        instantSubClassID = subClassID
-    end
-    if (not equipLoc or equipLoc == "") and instantEquipLoc and instantEquipLoc ~= "" then
-        equipLoc = instantEquipLoc
-    end
-    local isMountItem = (instantClassID == ITEM_CLASS_MISC and instantSubClassID == ITEM_SUBCLASS_MOUNT)
-    if isMountItem then
-        equipLoc = "MOUNT"
-    end
-    -- No dependemos de la DB estática para determinar la fuente
-    local journalSource = BuildSourceFromJournal and BuildSourceFromJournal() or nil
-    -- Solo permitir equipo (slot conocido o instant data) o tokens conocidos
-    local hasValidSlot = (equipLoc and SLOT_INFO[equipLoc] ~= nil)
-    local slotOverrideValid = (slotOverride and SLOT_INFO[slotOverride] ~= nil)
-    local isEquippable = IsEquippableItem(itemLink)
-    if not isEquippable and instantClassID then
-        if instantClassID == ITEM_CLASS_ARMOR or instantClassID == ITEM_CLASS_WEAPON then
-            isEquippable = true
-        end
-    end
-    if not slotOverrideValid and not hasValidSlot then
-        if isMountItem then
-            equipLoc = "MOUNT"
-            hasValidSlot = true
-        else
-            -- Permitir tokens u objetos sin ranura conocida, incluso si no son equipables.
-            if not isEquippable then
-                equipLoc = "RAID_TOKEN"
-                hasValidSlot = true
-            elseif not equipLoc or equipLoc == "" then
-                -- Equipo sin datos cargados aun: lo clasificamos temporalmente como token
-                equipLoc = "RAID_TOKEN"
-                hasValidSlot = true
-            else
-                return
-            end
-        end
-    end
-    if slotOverrideValid then
-        equipLoc = slotOverride
-        hasValidSlot = true
-    end
-    if not equipLoc or equipLoc == "" or not SLOT_INFO[equipLoc] then
-        equipLoc = "RAID_TOKEN"
-    end
-    -- Preferir solo la fuente del Journal (o override); no usar la DB para la fuente en Shift+Click
-    local source = sourceOverride or journalSource
-    -- Si se agrega desde un vendedor, usar el nombre del vendedor como fuente.
-    if (not source or source == "" or source == L["UNKNOWN_SOURCE"]) and MerchantFrame and MerchantFrame:IsShown() then
-        local vendorName = UnitName("npc") or UnitName("target") or L["UNKNOWN_SOURCE"]
-        if vendorName and vendorName ~= "" then
-            source = vendorName .. " (Vendor)"
-        else
-            source = "Vendor"
-        end
-    end
-    local ejDifficulty = nil
-    if EncounterJournal and EncounterJournal:IsShown() and EJ_GetDifficulty then
-        ejDifficulty = EJ_GetDifficulty()
-    end
-    -- Respaldo si no encontramos nada
-    if not source then
-        source = L["UNKNOWN_SOURCE"]
-    end
-    -- Determinar si es heroico usando link, dificultad y fuente
-    local plainLink = itemLink:match("|H(item:.-)|h") or itemLink
-    local isHeroic = IsHeroicItem(plainLink, source, ejDifficulty)
-    itemLink = plainLink
-    local resolvedSpec = ResolveSpecName(spec)
-    local resolvedSpecID = ResolveSpecID(spec)
-    if not CurrentCharDB[id] then
-        CurrentCharDB[id] = {
-            name = name or L["LOADING"],
-            link = itemLink,
-            slot = equipLoc, 
-            icon = icon,
-            boss = source,
-            bisType = bisType,
-            spec = resolvedSpec,
-            specID = resolvedSpecID,
-            isHeroic = isHeroic,
-            status = 0 
-        }
-        local displayName = name or L["LOADING"]
-        if quality and GetItemQualityColor and name then
-            local color = select(4, GetItemQualityColor(quality))
-            if color then
-                displayName = string.format("|c%s%s|r", color, name)
-            end
-        end
-        print(string.format(L["ADDED_MSG"], id, displayName))
-        LootHunter_RefreshUI()
-        if MerchantFrame and MerchantFrame:IsShown() then
-            HighlightTrackedMerchantItems()
-        end
-        MaybeRefreshJournalBoss(id)
-    else
-        if bisType then CurrentCharDB[id].bisType = bisType end
-        if resolvedSpecID and not CurrentCharDB[id].specID then
-            CurrentCharDB[id].specID = resolvedSpecID
-        end
-        if resolvedSpec and (not CurrentCharDB[id].spec or CurrentCharDB[id].spec == "") then
-            CurrentCharDB[id].spec = resolvedSpec
-        elseif spec then
-            CurrentCharDB[id].spec = spec
-        end
-        if sourceOverride then CurrentCharDB[id].boss = sourceOverride end
-        if (not CurrentCharDB[id].boss or CurrentCharDB[id].boss == L["UNKNOWN_SOURCE"]) and source then
-            CurrentCharDB[id].boss = source
-        end
-        CurrentCharDB[id].isHeroic = isHeroic
-        -- Si no tienen source establecido aún, intentar obtenerlo 
-        if not CurrentCharDB[id].boss or CurrentCharDB[id].boss == L["UNKNOWN_SOURCE"] then
-            CurrentCharDB[id].boss = source
-        end
-        LootHunter_RefreshUI()
-        if MerchantFrame and MerchantFrame:IsShown() then
-            HighlightTrackedMerchantItems()
-        end
-    end
-    if CurrentCharDB[id] and (not CurrentCharDB[id].boss or CurrentCharDB[id].boss == L["UNKNOWN_SOURCE"]) then
-        TryResolveSourceAsync(id)
-    end
-end
 
-function addonTable.ParseItemArg(arg)
-    if not arg or arg == "" then return nil, nil end
-    local link = arg:match("|Hitem:.-|h.-|h") or arg
-    local id = tonumber(link:match("item:(%d+)")) or tonumber(link)
-    return id, link
-end
+-- =============================================================
+-- SLASH COMMANDS
+-- =============================================================
 
-function addonTable.EnsureItemEntry(itemID, itemLink)
-    if not itemID then return nil end
-    if CurrentCharDB and CurrentCharDB[itemID] then
-        return CurrentCharDB[itemID]
-    end
-    local name, resolvedLink, quality = GetItemInfo(itemID)
-    local displayLink = resolvedLink or itemLink
-    local displayName = name or L["LOADING"]
-    if quality and GetItemQualityColor and name then
-        local color = select(4, GetItemQualityColor(quality))
-        if color then
-            displayName = string.format("|c%s%s|r", color, name)
-        end
-    end
-    CurrentCharDB[itemID] = {
-        name = displayName,
-        link = displayLink or displayName,
-        slot = "RAID_TOKEN",
-        icon = select(10, GetItemInfo(itemID)),
-        boss = L["UNKNOWN_SOURCE"],
-        bisType = nil,
-        spec = ResolveSpecName(),
-        specID = ResolveSpecID(),
-        isHeroic = false,
-        status = 0,
-    }
-    return CurrentCharDB[itemID]
-end
+-- Abre la ventana principal de LootHunter
 SLASH_LOOTHUNTER1 = "/loothunter"
 SLASH_LOOTHUNTER2 = "/lh"
 SlashCmdList["LOOTHUNTER"] = function(msg)
     LootHunter_CreateGUI()
 end
 
+-- Simula el kill de un boss (para pruebas sin entrar a instancia)
 SLASH_LOOTHUNTER_BOSS1 = "/lh_boss"
 SlashCmdList["LOOTHUNTER_BOSS"] = function(msg)
     local bossName = msg and msg:match("^%s*(.-)%s*$") or ""
     if bossName == "" then
-        print("[Loot Hunter] Usage: /lh_boss <boss name>")
+        print("[Loot Hunter] Uso: /lh_boss <nombre del boss>")
         return
     end
-    ScheduleCoinReminder(nil, bossName, true, true)
+    if addonTable.ScheduleCoinReminder then addonTable.ScheduleCoinReminder(nil, bossName, true, true) end
     C_Timer.After(5, function()
         if CurrentCharDB then
             for id, data in pairs(CurrentCharDB) do
                 if type(id) == "number" and type(data) == "table" and data.status == 0 then
-                    if ItemMatchesBossSource(data, bossName) then
+                    local matchFunc = addonTable.ItemMatchesBossSource
+                    -- Fallback: buscar en boss source directamente
+                    local matches = matchFunc and matchFunc(data, bossName)
+                        or (data.boss and data.boss:lower():find(bossName:lower(), 1, true))
+                    if matches then
                         ShowDropAlert(id, data)
-                        LootHunter_RefreshUI()
+                        if LootHunter_RefreshUI then LootHunter_RefreshUI() end
                     end
                 end
             end
@@ -3824,58 +674,58 @@ SlashCmdList["LOOTHUNTER_BOSS"] = function(msg)
     end)
 end
 
+-- Simula la aparición de un item en el loot (para pruebas)
 SLASH_LOOTHUNTER_DROP1 = "/lh_drop"
 SlashCmdList["LOOTHUNTER_DROP"] = function(msg)
     if not CurrentCharDB then return end
     local itemID, itemLink = addonTable.ParseItemArg(msg or "")
     if not itemID then
-        print("[Loot Hunter] Usage: /lh_drop <itemID or itemLink>")
+        print("[Loot Hunter] Uso: /lh_drop <itemID o itemLink>")
         return
     end
     local entry = addonTable.EnsureItemEntry(itemID, itemLink)
     ShowDropAlert(itemID, entry)
-    LootHunter_RefreshUI()
+    if LootHunter_RefreshUI then LootHunter_RefreshUI() end
 end
 
-
+-- Marca un item como obtenido manualmente
 SLASH_LOOTHUNTER_WON1 = "/lh_won"
 SlashCmdList["LOOTHUNTER_WON"] = function(msg)
     if not CurrentCharDB then return end
     local itemID, itemLink = addonTable.ParseItemArg(msg or "")
     if not itemID then
-        print("[Loot Hunter] Usage: /lh_won <itemID or itemLink>")
+        print("[Loot Hunter] Uso: /lh_won <itemID o itemLink>")
         return
     end
     local entry = addonTable.EnsureItemEntry(itemID, itemLink)
     if entry and entry.status ~= 2 then
-        entry.status = 2
+        entry.status    = 2
         entry.lastState = "won"
-        StatsStore:RecordHistoryEvent("won", { itemID = itemID, link = entry.link or entry.name, boss = entry.boss, player = UnitName("player") })
-        StatsStore:AddSessionLootEntry(itemID, entry.link or entry.name, UnitName("player"), select(2, UnitClass("player")), nil, false, entry.boss, entry.bonus)
-        LootHunter_RefreshUI()
+        if addonTable.StatsStore then
+            addonTable.StatsStore:RecordHistoryEvent("won", { itemID = itemID, link = entry.link or entry.name, boss = entry.boss, player = UnitName("player") })
+            addonTable.StatsStore:AddSessionLootEntry(itemID, entry.link or entry.name, UnitName("player"), select(2, UnitClass("player")), nil, false, entry.boss, entry.bonus)
+        end
+        if LootHunter_RefreshUI then LootHunter_RefreshUI() end
         if LootHunterDB.settings.lootAlerts.itemWon then
-            local winTitle = CreateGradient(L["WIN_ALERT_TITLE"], 0.35, 1, 0.35, 0.65, 1, 0.65)
-            local winDesc = CreateGradient(L["WIN_ALERT_DESC"], 0.35, 1, 0.35, 0.65, 1, 0.65)
+            local winTitle  = CreateGradient(L["WIN_ALERT_TITLE"], 0.35, 1, 0.35, 0.65, 1, 0.65)
+            local winDesc   = CreateGradient(L["WIN_ALERT_DESC"],  0.35, 1, 0.35, 0.65, 1, 0.65)
             local winBanner = string.format("%s %s %s", ICON_STAR, winTitle, ICON_STAR)
-            local itemLine = entry.link or entry.name or "?"
+            local itemLine  = entry.link or entry.name or "?"
             EnqueueAlert(ALERT_DEFAULT_DURATION, ALERT_PRIORITY_PRIMARY, function()
                 if addonTable.FlashScreen then addonTable.FlashScreen("WIN") end
-                if addonTable.ShowAlert then
-                    addonTable.ShowAlert(string.format("%s\n%s\n%s", winBanner, winDesc, itemLine), 0, 1, 0)
-                end
-                if not PlaySound(12891, "Master") then
-                    PlaySound(12891)
-                end
+                if addonTable.ShowAlert   then addonTable.ShowAlert(string.format("%s\n%s\n%s", winBanner, winDesc, itemLine), 0, 1, 0) end
+                if not PlaySound(12891, "Master") then PlaySound(12891) end
             end)
             print(string.format(L["CONGRATS_CHAT_MSG"], itemLine))
         end
     end
 end
 
+-- Muestra el Wall of Shame (anuncio de loot en un canal)
 SLASH_LOOTHUNTER_WALL1 = "/lh_wall"
 SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
     if not addonTable or not addonTable.AnnounceWallOfShame then
-        print("[Loot Hunter] Wall of shame is not available.")
+        print("[Loot Hunter] Wall of shame no está disponible.")
         return
     end
     if not StaticPopupDialogs then
@@ -3884,30 +734,25 @@ SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
     end
     if not StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"] then
         StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"] = {
-            text = L["STATS_WALL_CHANNEL_PROMPT"] or "Where do you want to announce the Wall of Shame?",
-            button1 = L["STATS_WALL_CHANNEL_LOCAL"] or "Local",
-            button2 = L["STATS_WALL_CHANNEL_GUILD"] or "Guild",
-            button3 = L["STATS_WALL_CHANNEL_RAID"] or "Raid",
-            OnAccept = function()
-                addonTable.AnnounceWallOfShame("LOCAL")
-            end,
-            OnCancel = function()
-                addonTable.AnnounceWallOfShame("GUILD")
-            end,
-            OnAlt = function()
-                addonTable.AnnounceWallOfShame("RAID")
-            end,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
+            text    = L["STATS_WALL_CHANNEL_PROMPT"] or "¿Dónde quieres anunciarlo?",
+            button1 = L["STATS_WALL_CHANNEL_LOCAL"]  or "Local",
+            button2 = L["STATS_WALL_CHANNEL_GUILD"]  or "Guild",
+            button3 = L["STATS_WALL_CHANNEL_RAID"]   or "Raid",
+            OnAccept = function() addonTable.AnnounceWallOfShame("LOCAL") end,
+            OnCancel = function() addonTable.AnnounceWallOfShame("GUILD") end,
+            OnAlt    = function() addonTable.AnnounceWallOfShame("RAID")  end,
+            timeout        = 0,
+            whileDead      = true,
+            hideOnEscape   = true,
             preferredIndex = 3,
         }
     else
-        StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].text = L["STATS_WALL_CHANNEL_PROMPT"] or StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].text
-        StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button1 = L["STATS_WALL_CHANNEL_LOCAL"] or StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button1
-        StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button2 = L["STATS_WALL_CHANNEL_GUILD"] or StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button2
-        StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button3 = L["STATS_WALL_CHANNEL_RAID"] or StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"].button3
+        -- Actualizar strings localizados si el idioma cambió
+        local d = StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"]
+        d.text    = L["STATS_WALL_CHANNEL_PROMPT"] or d.text
+        d.button1 = L["STATS_WALL_CHANNEL_LOCAL"]  or d.button1
+        d.button2 = L["STATS_WALL_CHANNEL_GUILD"]  or d.button2
+        d.button3 = L["STATS_WALL_CHANNEL_RAID"]   or d.button3
     end
     StaticPopup_Show("LOOTHUNTER_WALL_CHANNEL")
 end
-
