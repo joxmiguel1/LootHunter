@@ -1,6 +1,9 @@
 All notable changes to this project will be documented in this file.
 
 
+## v1.2.1
+- Fixed: critical error in `ShowDropAlert()` when tracking drop alerts (LastDropAlert was nil).
+
 ## v1.2
 - Code structure: refactored the monolithic `LootHunter.lua` core into dedicated modules under `Modules/` (`SessionTracker`, `StatsStore`, `LootParser`, `CoinReminder`, `Utils`, etc.) for better maintainability; eliminated duplicate helper functions and localized hardcoded strings.
 - Session tracking: raid sessions no longer close on a day change while the player is still in a raid group; the same session continues across midnight and only splits into a new record when leaving the group.

@@ -44,6 +44,9 @@ local ICON_DIAMOND  = addonTable.ICON_DIAMOND  or "|TInterface\\TargetingFrame\\
 -- SLOT_INFO: tabla de categorías de equipo con nombre localizado
 -- =============================================================
 local SLOT_INFO = {}
+
+-- Tabla para rastrear el último alert de DROP por itemID (anti-duplicados)
+local LastDropAlert = {}
 local function RebuildSlotInfo()
     SLOT_INFO = {
         ["RAID_TOKEN"]            = { order = 0,  name = L["RAID_TOKEN"]   },
