@@ -4,7 +4,7 @@
 ## Notes-esES: Rastrea tu botín deseado y recibe alertas cuando aparece.
 ## Notes-esMX: Rastrea tu botín deseado y recibe alertas cuando aparece.
 ## Author: Xamael
-## Version: 1.2.1
+## Version: 1.3
 ## SavedVariables: LootHunterDB
 ## IconTexture: Interface\AddOns\LootHunter\Textures\icon_help.tga
 ## X-Curse-Project-ID: 1417341

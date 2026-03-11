@@ -208,7 +208,7 @@ local function GetWallOfShame(session)
             deadTime[name] = seconds
         end
     end
-    -- Include ongoing dead time even if there was no resurrect event.
+    -- Incluir tiempo muerto activo aunque no haya habido evento de resurrección.
     if session and session.deathStart then
         local now = (type(time) == "function" and time()) or (GetTime and GetTime()) or 0
         for name, startedAt in pairs(session.deathStart) do
@@ -561,7 +561,7 @@ local function BuildLootList(parent, items)
         SetAccentFont(rollFS, 10)
         local rollType = info.rollType
 
-        -- Loot source icon logic
+        -- Lógica del ícono según fuente de loot
         local iconTexture = TEX_BAG
         local texCoord = { 0.08, 0.92, 0.08, 0.92 }
         if info.bonus then
@@ -587,7 +587,7 @@ local function BuildLootList(parent, items)
             end
             texCoord = nil
         else
-            -- Direct drop; use equipped check icon
+            -- Drop directo; usar ícono de equipado
             iconTexture = TEX_EQUIPPED
             texCoord = nil
             if not iconTexture or iconTexture == "" then
@@ -732,8 +732,8 @@ local function BuildStatsPanel(frame)
         local margin = 12
         local interGap = 20
         local available = math.max(200, w - (margin * 2) - interGap)
-        local colWLeft = math.max(140, ((available - 20) / 2) - 40) -- shrink ~80px from previous width
-        local colWRight = colWLeft + 95 -- give the right column ~50px extra width
+        local colWLeft = math.max(140, ((available - 20) / 2) - 40) -- reducir ~80px respecto al ancho anterior
+        local colWRight = colWLeft + 95 -- dar ~50px extra de ancho a la columna derecha
         if colWLeft + colWRight > available then
             colWLeft = math.max(150, (available - 20) / 2)
             colWRight = available - colWLeft
@@ -749,7 +749,7 @@ local function BuildStatsPanel(frame)
     frame:SetScript("OnSizeChanged", UpdateColumnPositions)
     UpdateColumnPositions()
 
-    -- Left column: Current List + History
+    -- Columna izquierda: Lista actual + Historial
     local currentTitle = colLeft:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     currentTitle:SetPoint("TOPLEFT", colLeft, "TOPLEFT", 0, 0)
     SetSectionTitle(currentTitle, L["STATS_CURRENT_LIST"] or "Current List")
@@ -778,7 +778,36 @@ local function BuildStatsPanel(frame)
     AddStatRow(colLeft, L["STATS_BOSS_NO_LOOT"] or "Bosses without your loot", tostring(historyData.bossNoLoot or 0), -256)
     AddStatBlock(colLeft, L["STATS_TIME_SINCE_LAST_WIN"] or "Time since last winning drop", FormatSince(historyData.lastWinAt), -284)
 
-    -- Session context
+    -- Botón Wall of Shame
+    local wallBtn = CreateFrame("Button", nil, colLeft, "BackdropTemplate")
+    wallBtn:SetSize(132, 24)
+    wallBtn:SetPoint("TOPLEFT", colLeft, "TOPLEFT", 0, -338)
+    wallBtn:SetText(L["STATS_WALL_BTN"] or "Wall of Shame")
+    wallBtn:SetNormalFontObject("GameFontHighlightSmall")
+    SetAccentFont(wallBtn:GetFontString(), 11)
+    wallBtn:GetFontString():ClearAllPoints()
+    wallBtn:GetFontString():SetPoint("LEFT", wallBtn, "LEFT", 28, 0)
+    wallBtn:GetFontString():SetPoint("RIGHT", wallBtn, "RIGHT", -28, 0)
+    wallBtn:GetFontString():SetJustifyH("LEFT")
+    wallBtn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+    wallBtn:SetBackdropColor(0.2, 0.2, 0.2, 1)
+    wallBtn:SetBackdropBorderColor(0, 0, 0, 1)
+
+    local wallBtnIcon = wallBtn:CreateTexture(nil, "ARTWORK")
+    wallBtnIcon:SetSize(14, 14)
+    wallBtnIcon:SetPoint("LEFT", wallBtn, "LEFT", 8, 0)
+    wallBtnIcon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
+
+    local wallBtnIconRight = wallBtn:CreateTexture(nil, "ARTWORK")
+    wallBtnIconRight:SetSize(14, 14)
+    wallBtnIconRight:SetPoint("RIGHT", wallBtn, "RIGHT", -8, 0)
+    wallBtnIconRight:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
+
+    wallBtn:SetScript("OnClick", function()
+        SlashCmdList["LOOTHUNTER_WALL"]("")
+    end)
+
+    -- Contexto de sesión
     local sessionList = EnsureSessionSelection()
     addonTable.SelectedSessionKey = selectedSessionKey
     local sessionKey = selectedSessionKey
@@ -792,7 +821,7 @@ local function BuildStatsPanel(frame)
         end
     end
     local sessionItems = (addonTable.GetSessionItems and addonTable.GetSessionItems(sessionKey)) or nil
-    -- Right column header + dropdowns
+    -- Columna derecha: encabezado y desplegables
     local raidTitle = colRight:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     raidTitle:SetPoint("TOPLEFT", colRight, "TOPLEFT", 0, 0)
     raidTitle:SetPoint("TOPRIGHT", colRight, "TOPRIGHT", 0, 0)

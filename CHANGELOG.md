@@ -1,8 +1,14 @@
 All notable changes to this project will be documented in this file.
 
 
+## v1.3
+- Miscellaneous: added "Auto-remove won items from list" option(Disabled by default)
+- Stats: added "Wall of Shame" shortcut button at the bottom of the left column in Stats tab for quick access to `/lh_wall` command.
+- UI: clear/delete button now shows a context menu with two options: "Delete won items" or "Delete entire list".
+- Wall of Shame: Fixed Escape/close-button behavior so closing the dialog no longer sends the message to guild automatically (sorry for that).
+
 ## v1.2.1
-- Fixed: critical error in `ShowDropAlert()` when tracking drop alerts (LastDropAlert was nil).
+- Fixed: critical error in `ShowDropAlert()` when tracking drop alerts 
 
 ## v1.2
 - Code structure: refactored the monolithic `LootHunter.lua` core into dedicated modules under `Modules/` (`SessionTracker`, `StatsStore`, `LootParser`, `CoinReminder`, `Utils`, etc.) for better maintainability; eliminated duplicate helper functions and localized hardcoded strings.

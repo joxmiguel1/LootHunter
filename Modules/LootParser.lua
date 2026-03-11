@@ -518,6 +518,12 @@ local function HandleChatLoot(event, msg, ...)
             itemData.lastState = "won"
             addonTable.StatsStore:RecordHistoryEvent("won", { itemID = id, link = itemData.link or itemData.name, boss = itemData.boss, player = UnitName("player") })
             if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+            
+            -- Auto-remove from list if setting is enabled
+            if LootHunterDB.settings.misc and LootHunterDB.settings.misc.autoRemoveFromList then
+                CurrentCharDB[id] = nil
+            end
+            
             addonTable.RemoveItemFromReminder(id)
             local allowScope = IsScopeAllowed(LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.lootAlerts and LootHunterDB.settings.lootAlerts.lostAlertScope)
             if allowScope and LootHunterDB.settings.lootAlerts.itemWon then

@@ -657,7 +657,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         label:SetText(labelText or key)
         do
             local pr, pg, pb = GetPrimaryColor()
-            label:SetTextColor((pr + 1) * 0.5, (pg + 1) * 0.5, (pb + 1) * 0.5) -- Subtitle color: primary mixed 50% with white
+            label:SetTextColor((pr + 1) * 0.5, (pg + 1) * 0.5, (pb + 1) * 0.5) -- Color subtítulo: primario mezclado 50% con blanco
         end
 
         local slider = CreateFrame("Slider", "LootHunter_SettingsSlider_"..key:gsub("%.", "_"), entryFrame, "OptionsSliderTemplate")
@@ -672,7 +672,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         valueText:SetJustifyH("LEFT")
         do
             local pr, pg, pb = GetPrimaryColor()
-            valueText:SetTextColor(pr, pg, pb) -- Primary color for live value
+            valueText:SetTextColor(pr, pg, pb) -- Color primario para el valor en vivo
         end
 
         local low = slider.Low or _G[slider:GetName() .. "Low"]
@@ -680,11 +680,11 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         local fmt = formatFn or FormatSecondsText
         if low then
             low:SetText(fmt(minValue or 0))
-            low:SetTextColor(0.75, 0.75, 0.75) -- Light gray min label
+            low:SetTextColor(0.75, 0.75, 0.75) -- Gris claro para etiqueta mínima
         end
         if high then
             high:SetText(fmt(maxValue or 0))
-            high:SetTextColor(0.75, 0.75, 0.75) -- Light gray max label
+            high:SetTextColor(0.75, 0.75, 0.75) -- Gris claro para etiqueta máxima
         end
         if slider.Text then slider.Text:Hide() end
 
@@ -695,7 +695,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
             desc:SetPoint("RIGHT", entryFrame, "RIGHT", -10, 0)
             desc:SetJustifyH("LEFT")
             desc:SetWordWrap(true)
-            if desc.SetMaxLines then pcall(desc.SetMaxLines, desc, 0) end -- allow full wrap
+            if desc.SetMaxLines then pcall(desc.SetMaxLines, desc, 0) end -- permitir ajuste de línea completo
             if desc.SetNonSpaceWrap then
                 pcall(desc.SetNonSpaceWrap, desc, true)
             end
@@ -895,7 +895,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
             addonTable.ShowAlert(msg, 1, 0, 0)
         end
         if addonTable.FlashScreen then addonTable.FlashScreen("RED") end
-        -- Preview intentionally without sound.
+        -- Vista previa sin sonido intencional.
     end
 
     local function PreviewOtherWonSound()
@@ -1173,7 +1173,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         L["SETTING_LANGUAGE_DESC"]
     )
 
-    -- Miscellaneous (placed last in sidebar)
+    -- Misceláneos (colocado al final del sidebar)
     local miscPanel = Settings:CreateCategory("Miscellaneous", L["SETTING_MISC_TITLE"])
     CreateDescription(miscPanel, L["SETTING_MISC_DESC"])
     Settings:CreateCheckbox(miscPanel, "misc.heroicQueueConfirm", L["SETTING_MISC_HEROIC_LABEL"], L["SETTING_MISC_HEROIC_DESC"])
@@ -1183,6 +1183,7 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
             if addonTable.UpdateRaidChatFilter then addonTable.UpdateRaidChatFilter() end
         end)
     end
+    Settings:CreateCheckbox(miscPanel, "misc.autoRemoveFromList", L["SETTING_MISC_AUTO_REMOVE_LABEL"], L["SETTING_MISC_AUTO_REMOVE_DESC"])
     Settings:CreateCheckbox(miscPanel, "lootAlerts.bossNoItems", L["SETTING_ALERTS_BOSS_NONE_LABEL"], L["SETTING_ALERTS_BOSS_NONE_DESC"])
 
     -- Seleccionar la primera categoria por defecto

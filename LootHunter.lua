@@ -164,6 +164,7 @@ local function InitializeSettings()
         misc = {
             heroicQueueConfirm = true,
             muteRaidChannels   = false,
+            autoRemoveFromList = false,
         },
         general = {
             windowsLocked = true,
@@ -207,7 +208,7 @@ local function InitializeSettings()
 end
 
 -- =============================================================
--- VALIDATE ADDON ASSETS
+-- VALIDAR RECURSOS DEL ADDON
 -- =============================================================
 local function ValidateAddonAssets()
     if type(L) ~= "table" then return end
@@ -387,7 +388,7 @@ local function HandleEncounterEnd(event, encounterID, bossName, _, success, ...)
 end
 
 -- =============================================================
--- ADD ITEM TO LIST
+-- AGREGAR ITEM A LA LISTA
 -- =============================================================
 
 -- Solicita los datos del item al servidor si no están disponibles aún
@@ -721,6 +722,12 @@ SlashCmdList["LOOTHUNTER_WON"] = function(msg)
             end)
             print(string.format(L["CONGRATS_CHAT_MSG"], itemLine))
         end
+        
+        -- Eliminar automáticamente de la lista si la opción está activada
+        if LootHunterDB.settings.misc and LootHunterDB.settings.misc.autoRemoveFromList then
+            CurrentCharDB[itemID] = nil
+            if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+        end
     end
 end
 
@@ -742,8 +749,54 @@ SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
             button2 = L["STATS_WALL_CHANNEL_GUILD"]  or "Guild",
             button3 = L["STATS_WALL_CHANNEL_RAID"]   or "Raid",
             OnAccept = function() addonTable.AnnounceWallOfShame("LOCAL") end,
-            OnCancel = function() addonTable.AnnounceWallOfShame("GUILD") end,
+            OnCancel = function() end,
             OnAlt    = function() addonTable.AnnounceWallOfShame("RAID")  end,
+            OnShow = function(self)
+                self:SetHeight(150)
+
+                if self.text then
+                    self.text:ClearAllPoints()
+                    self.text:SetPoint("TOP", self, "TOP", 0, -22)
+                    self.text:SetPoint("LEFT", self, "LEFT", 28, 0)
+                    self.text:SetPoint("RIGHT", self, "RIGHT", -28, 0)
+                end
+
+                if self.button1 then
+                    self.button1:ClearAllPoints()
+                    self.button1:SetPoint("BOTTOMLEFT", self, "BOTTOMLEFT", 32, 22)
+                    self.button1:SetWidth(168)
+                end
+
+                if self.button2 then
+                    self.button2:ClearAllPoints()
+                    self.button2:SetPoint("BOTTOM", self, "BOTTOM", 0, 22)
+                    self.button2:SetWidth(168)
+                    self.button2:SetScript("OnClick", function()
+                        StaticPopup_Hide("LOOTHUNTER_WALL_CHANNEL")
+                        addonTable.AnnounceWallOfShame("GUILD")
+                    end)
+                end
+
+                if self.button3 then
+                    self.button3:ClearAllPoints()
+                    self.button3:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -32, 22)
+                    self.button3:SetWidth(168)
+                end
+
+                if not self.lhCloseButton then
+                    local closeButton = CreateFrame("Button", nil, self, "UIPanelCloseButton")
+                    closeButton:SetPoint("TOPRIGHT", self, "TOPRIGHT", -4, -4)
+                    closeButton:SetScript("OnClick", function()
+                        StaticPopup_Hide("LOOTHUNTER_WALL_CHANNEL")
+                    end)
+                    self.lhCloseButton = closeButton
+                end
+
+                self.lhCloseButton:Show()
+            end,
+            OnHide = function(self)
+                if self.lhCloseButton then self.lhCloseButton:Hide() end
+            end,
             timeout        = 0,
             whileDead      = true,
             hideOnEscape   = true,

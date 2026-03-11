@@ -19,6 +19,8 @@ local pendingRefresh = false
 local refreshAfterRowDropdown = false
 local specRowMenuFrame = nil
 local specRowMenuOverlay = nil
+local clearMenuDropdown = nil
+local clearMenuOverlay = nil
 local typeMenuFrame, sourceMenuFrame, specMenuFrame = nil, nil, nil
 local DEFAULT_WINDOW_WIDTH = 530
 local DEFAULT_WINDOW_HEIGHT = 456
@@ -116,6 +118,8 @@ local function CloseAllDropdowns()
     if specMenuFrame then specMenuFrame:Hide() end
     if specRowMenuFrame then specRowMenuFrame:Hide() end
     if specRowMenuOverlay then specRowMenuOverlay:Hide() end
+    if clearMenuDropdown then CloseDropDownMenus() end
+    if clearMenuOverlay then clearMenuOverlay:Hide() end
 end
 
 -- Desplegable de selección de spec por fila
@@ -1154,19 +1158,131 @@ function LootHunter_CreateGUI()
     clearIcon:SetPoint("CENTER")
     clearIcon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
 
-    btnClear:SetScript("OnClick", function()
-        if StaticPopupDialogs and StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR"] then
-            StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR"].text = L["CONFIRM_CLEAR_TEXT"]
+    if not clearMenuDropdown then
+        clearMenuDropdown = CreateFrame("Frame", "LootHunterClearMenu", UIParent, "UIDropDownMenuTemplate")
+        clearMenuDropdown.displayMode = "MENU"
+        clearMenuDropdown:SetClampedToScreen(true)
+        UIDropDownMenu_Initialize(clearMenuDropdown, function(_, level)
+            if level ~= 1 then return end
+
+            UIDropDownMenu_AddButton({
+                text = L["MENU_CLEAR_WON"] or "Delete won items",
+                notCheckable = 1,
+                func = function()
+                    CloseDropDownMenus()
+                    if clearMenuOverlay then clearMenuOverlay:Hide() end
+                    if StaticPopupDialogs and StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR"] then
+                        StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR"].text = L["CONFIRM_CLEAR_WON_TEXT"]
+                        StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR"].OnAccept = function()
+                            local db = addonTable.CurrentCharDB
+                            if db then
+                                local keysToRemove = {}
+                                for k, v in pairs(db) do
+                                    if type(k) == "number" and type(v) == "table" and v.status == 2 then
+                                        table.insert(keysToRemove, k)
+                                    end
+                                end
+                                for _, key in ipairs(keysToRemove) do db[key] = nil end
+                                if #keysToRemove > 0 then
+                                    print(L["WON_ITEMS_CLEARED"])
+                                    LootHunter_RefreshUI()
+                                end
+                            end
+                        end
+                    end
+                    StaticPopup_Show("LOOTHUNTER_CONFIRM_CLEAR")
+                end
+            }, level)
+
+            UIDropDownMenu_AddButton({
+                text = " ",
+                notCheckable = 1,
+                disabled = 1,
+            }, level)
+
+            UIDropDownMenu_AddButton({
+                text = L["MENU_CLEAR_ALL"] or "Delete entire list",
+                notCheckable = 1,
+                func = function()
+                    CloseDropDownMenus()
+                    if clearMenuOverlay then clearMenuOverlay:Hide() end
+                    if StaticPopupDialogs and StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR"] then
+                        StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR"].text = L["CONFIRM_CLEAR_TEXT"]
+                        StaticPopupDialogs["LOOTHUNTER_CONFIRM_CLEAR"].OnAccept = function()
+                            local db = addonTable.CurrentCharDB
+                            if db then
+                                local keysToRemove = {}
+                                for k in pairs(db) do if type(k) == "number" then table.insert(keysToRemove, k) end end
+                                for _, key in ipairs(keysToRemove) do db[key] = nil end
+                                print(L["LIST_CLEARED_MSG"])
+                                LootHunter_RefreshUI()
+                            end
+                        end
+                    end
+                    StaticPopup_Show("LOOTHUNTER_CONFIRM_CLEAR")
+                end
+            }, level)
+        end)
+        clearMenuDropdown:SetScript("OnHide", function()
+            if clearMenuOverlay then clearMenuOverlay:Hide() end
+        end)
+    end
+
+    if not clearMenuOverlay then
+        clearMenuOverlay = CreateFrame("Button", nil, UIParent)
+        clearMenuOverlay:SetAllPoints(UIParent)
+        clearMenuOverlay:SetFrameStrata("DIALOG")
+        clearMenuOverlay:SetFrameLevel(200)
+        clearMenuOverlay:EnableMouse(true)
+        clearMenuOverlay:Hide()
+        clearMenuOverlay:SetScript("OnClick", function()
+            CloseDropDownMenus()
+            clearMenuOverlay:Hide()
+        end)
+    end
+
+    local function StyleClearMenuDropdown()
+        local dropdownList = _G.DropDownList1
+        if not dropdownList or not dropdownList:IsShown() then return end
+
+        for i = 1, UIDROPDOWNMENU_MAXBUTTONS or 32 do
+            local button = _G["DropDownList1Button" .. i]
+            local normalText = _G["DropDownList1Button" .. i .. "NormalText"] or (button and button.NormalText)
+            local invisibleButton = _G["DropDownList1Button" .. i .. "InvisibleButton"]
+
+            if button and button:IsShown() and normalText then
+                ApplyAccentFont(normalText, 13)
+
+                if i == 3 then
+                    normalText:SetTextColor(0.9, 0.2, 0.2)
+                    if button.DisabledText then button.DisabledText:SetTextColor(0.9, 0.2, 0.2) end
+                    if button.Highlight then button.Highlight:SetVertexColor(0.4, 0.08, 0.08, 0.35) end
+                elseif i == 2 then
+                    normalText:SetTextColor(0, 0, 0, 0)
+                    if button.DisabledText then button.DisabledText:SetTextColor(0.6, 0.6, 0.6) end
+                else
+                    normalText:SetTextColor(1, 1, 1)
+                    if button.DisabledText then button.DisabledText:SetTextColor(1, 1, 1) end
+                    if button.Highlight then button.Highlight:SetVertexColor(0.18, 0.18, 0.18, 0.35) end
+                end
+
+                if invisibleButton and invisibleButton.NormalText then
+                    ApplyAccentFont(invisibleButton.NormalText, 13)
+                end
+            end
         end
-        StaticPopup_Show("LOOTHUNTER_CONFIRM_CLEAR")
-    end)
-    btnClear:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
-        GameTooltip:SetText(L["BTN_CLEAR_TOOLTIP"], nil, nil, nil, nil, true)
-        GameTooltip:Show()
-    end)
-    btnClear:SetScript("OnLeave", function()
+    end
+
+    btnClear:SetScript("OnClick", function(self)
+        CloseAllDropdowns()
         GameTooltip:Hide()
+        clearMenuOverlay:Show()
+        ToggleDropDownMenu(1, nil, clearMenuDropdown, self, 0, -5)
+        clearMenuDropdown:SetFrameStrata("TOOLTIP")
+        clearMenuDropdown:SetFrameLevel((self:GetFrameLevel() or 0) + 20)
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, StyleClearMenuDropdown)
+        end
     end)
 
     -- Elementos de Lista Vacía
