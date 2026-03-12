@@ -363,8 +363,18 @@ local function HandleLootEvent(event)
             local link   = GetLootSlotLink(slot)
             local itemID = link and tonumber(link:match("item:(%d+):"))
             if itemID and CurrentCharDB[itemID] and CurrentCharDB[itemID].status == 0 then
+                CurrentCharDB[itemID].status = 1
+                if addonTable.MarkRecentDrop then addonTable.MarkRecentDrop(itemID) end
                 ShowDropAlert(itemID, CurrentCharDB[itemID])
                 if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+                -- Auto-reset si nadie lo recoge y CHAT_MSG_LOOT nunca llega
+                local capturedID = itemID
+                C_Timer.After(120, function()
+                    if CurrentCharDB and CurrentCharDB[capturedID] and CurrentCharDB[capturedID].status == 1 then
+                        CurrentCharDB[capturedID].status = 0
+                        if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+                    end
+                end)
             end
         end
     end
@@ -742,9 +752,32 @@ SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
         addonTable.AnnounceWallOfShame("LOCAL")
         return
     end
+
+    -- Resolve current session label
+    local function BuildWallPromptText()
+        local _key = addonTable.SelectedSessionKey
+        if not _key and addonTable.GetCurrentSessionKey then _key = addonTable.GetCurrentSessionKey() end
+        if not _key and addonTable.GetLatestSessionKey  then _key = addonTable.GetLatestSessionKey()  end
+        local sessionLabel = nil
+        if _key and addonTable.GetSessionByKey then
+            local _session = addonTable.GetSessionByKey(_key)
+            if _session then
+                local _raidName = _session.raidName or "Raid"
+                local _idx      = _session.sessionIndex or 1
+                local _dateStr  = (_session.startedAt and type(date) == "function") and date("%m/%d/%Y", _session.startedAt) or ""
+                sessionLabel = _session.label or string.format("%s #%d - %s", _raidName, _idx, _dateStr ~= "" and _dateStr or "N/A")
+            end
+        end
+        local promptText = L["STATS_WALL_CHANNEL_PROMPT"] or "Where do you want to announce the Wall of Shame?"
+        if sessionLabel then
+            promptText = promptText .. "\n\n" .. string.format(L["STATS_WALL_SESSION_LABEL"] or "Session: %s", sessionLabel)
+        end
+        return promptText
+    end
+
     if not StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"] then
         StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"] = {
-            text    = L["STATS_WALL_CHANNEL_PROMPT"] or "¿Dónde quieres anunciarlo?",
+            text    = BuildWallPromptText(),
             button1 = L["STATS_WALL_CHANNEL_LOCAL"]  or "Local",
             button2 = L["STATS_WALL_CHANNEL_GUILD"]  or "Guild",
             button3 = L["STATS_WALL_CHANNEL_RAID"]   or "Raid",
@@ -752,7 +785,7 @@ SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
             OnCancel = function() end,
             OnAlt    = function() addonTable.AnnounceWallOfShame("RAID")  end,
             OnShow = function(self)
-                self:SetHeight(150)
+                self:SetHeight(165)
 
                 if self.text then
                     self.text:ClearAllPoints()
@@ -802,13 +835,14 @@ SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
             hideOnEscape   = true,
             preferredIndex = 3,
         }
-    else
-        -- Actualizar strings localizados si el idioma cambió
-        local d = StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"]
-        d.text    = L["STATS_WALL_CHANNEL_PROMPT"] or d.text
-        d.button1 = L["STATS_WALL_CHANNEL_LOCAL"]  or d.button1
-        d.button2 = L["STATS_WALL_CHANNEL_GUILD"]  or d.button2
-        d.button3 = L["STATS_WALL_CHANNEL_RAID"]   or d.button3
     end
+
+    -- Always update text and button labels before showing (supports locale changes and session changes)
+    local d = StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"]
+    d.text    = BuildWallPromptText()
+    d.button1 = L["STATS_WALL_CHANNEL_LOCAL"] or d.button1
+    d.button2 = L["STATS_WALL_CHANNEL_GUILD"] or d.button2
+    d.button3 = L["STATS_WALL_CHANNEL_RAID"]  or d.button3
+
     StaticPopup_Show("LOOTHUNTER_WALL_CHANNEL")
 end

@@ -1244,6 +1244,7 @@ function LootHunter_CreateGUI()
     local function StyleClearMenuDropdown()
         local dropdownList = _G.DropDownList1
         if not dropdownList or not dropdownList:IsShown() then return end
+        dropdownList:SetWidth(160)
 
         for i = 1, UIDROPDOWNMENU_MAXBUTTONS or 32 do
             local button = _G["DropDownList1Button" .. i]
@@ -1277,6 +1278,7 @@ function LootHunter_CreateGUI()
         CloseAllDropdowns()
         GameTooltip:Hide()
         clearMenuOverlay:Show()
+        UIDropDownMenu_SetWidth(clearMenuDropdown, 190)
         ToggleDropDownMenu(1, nil, clearMenuDropdown, self, 0, -5)
         clearMenuDropdown:SetFrameStrata("TOOLTIP")
         clearMenuDropdown:SetFrameLevel((self:GetFrameLevel() or 0) + 20)

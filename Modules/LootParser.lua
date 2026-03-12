@@ -617,6 +617,15 @@ local function HandleChatLinkAnnounce(event, msg, sender, ...)
     local CurrentCharDB = addonTable.CurrentCharDB
     if not CurrentCharDB or type(msg) ~= "string" then return end
     if not IsAuthorizedAnnounce(sender) then return end
+    -- Filtro Gargul: Gargul prefija todos sus mensajes de chat con "{rt3} Gargul :"
+    -- Al anunciar los drops del boss (ML abre el cadáver), envía SOLO el item link puro.
+    -- Sus otros mensajes (premios, encantamientos, GDKP, "Reserved by:") incluyen texto
+    -- adicional alrededor del link. Bloqueamos solo esos; dejamos pasar los anuncios de drops.
+    if msg:find("Gargul", 1, true) then
+        local afterPrefix = msg:match("Gargul%s*:%s*(.+)") or ""
+        local textOnly = afterPrefix:gsub("|Hitem:[^|]+|h.-|h", ""):gsub("%s+", "")
+        if textOnly ~= "" then return end   -- tiene texto → no es anuncio de drop → ignorar
+    end
     for link in msg:gmatch("|Hitem:[-%d:]+|h.-|h") do
         local itemID = tonumber(link:match("item:(%d+):"))
         if itemID and CurrentCharDB[itemID] and CurrentCharDB[itemID].status == 0 then

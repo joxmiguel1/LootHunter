@@ -395,7 +395,7 @@ local function AddStatBlock(parent, title, value, yOffset)
     val:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -6)
     val:SetText(value or "")
     SetAccentFont(val, 13)
-
+    return label, val
 end
 
 local function BuildLootList(parent, items)
@@ -776,36 +776,21 @@ local function BuildStatsPanel(frame)
     AddStatRow(colLeft, L["STATS_REMINDERS"] or "Coin reminders", tostring(historyData.coinReminders or 0), -212)
     AddStatRow(colLeft, L["STATS_COINS_USED"] or "Coins used", tostring(historyData.coinsUsed or 0), -234)
     AddStatRow(colLeft, L["STATS_BOSS_NO_LOOT"] or "Bosses without your loot", tostring(historyData.bossNoLoot or 0), -256)
-    AddStatBlock(colLeft, L["STATS_TIME_SINCE_LAST_WIN"] or "Time since last winning drop", FormatSince(historyData.lastWinAt), -284)
+    local timeLabel, timeVal = AddStatBlock(colLeft, L["STATS_TIME_SINCE_LAST_WIN"] or "Time since last winning drop", FormatSince(historyData.lastWinAt), -284)
+    if historyData.lastWinLink and timeVal then
+        local hover = CreateFrame("Button", nil, colLeft)
+        hover:SetPoint("TOPLEFT", timeLabel, "TOPLEFT", -2, 2)
+        hover:SetPoint("BOTTOMRIGHT", timeVal, "BOTTOMRIGHT", 2, -2)
+        hover:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(historyData.lastWinLink)
+        end)
+        hover:SetScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
+    end
 
-    -- Botón Wall of Shame
-    local wallBtn = CreateFrame("Button", nil, colLeft, "BackdropTemplate")
-    wallBtn:SetSize(132, 24)
-    wallBtn:SetPoint("TOPLEFT", colLeft, "TOPLEFT", 0, -338)
-    wallBtn:SetText(L["STATS_WALL_BTN"] or "Wall of Shame")
-    wallBtn:SetNormalFontObject("GameFontHighlightSmall")
-    SetAccentFont(wallBtn:GetFontString(), 11)
-    wallBtn:GetFontString():ClearAllPoints()
-    wallBtn:GetFontString():SetPoint("LEFT", wallBtn, "LEFT", 28, 0)
-    wallBtn:GetFontString():SetPoint("RIGHT", wallBtn, "RIGHT", -28, 0)
-    wallBtn:GetFontString():SetJustifyH("LEFT")
-    wallBtn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
-    wallBtn:SetBackdropColor(0.2, 0.2, 0.2, 1)
-    wallBtn:SetBackdropBorderColor(0, 0, 0, 1)
-
-    local wallBtnIcon = wallBtn:CreateTexture(nil, "ARTWORK")
-    wallBtnIcon:SetSize(14, 14)
-    wallBtnIcon:SetPoint("LEFT", wallBtn, "LEFT", 8, 0)
-    wallBtnIcon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
-
-    local wallBtnIconRight = wallBtn:CreateTexture(nil, "ARTWORK")
-    wallBtnIconRight:SetSize(14, 14)
-    wallBtnIconRight:SetPoint("RIGHT", wallBtn, "RIGHT", -8, 0)
-    wallBtnIconRight:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
-
-    wallBtn:SetScript("OnClick", function()
-        SlashCmdList["LOOTHUNTER_WALL"]("")
-    end)
+    -- (Wall of Shame button is now placed next to the session dropdown in the right column)
 
     -- Contexto de sesión
     local sessionList = EnsureSessionSelection()
@@ -861,10 +846,29 @@ local function BuildStatsPanel(frame)
         return btn
     end
 
+    -- Skull icon button that triggers Wall of Shame, anchored to the right of the dropdown row
+    local wallIconBtn = CreateFrame("Button", nil, dropdownRow)
+    wallIconBtn:SetSize(22, 22)
+    wallIconBtn:SetPoint("RIGHT", dropdownRow, "RIGHT", 0, 0)
+    local wallIconTex = wallIconBtn:CreateTexture(nil, "ARTWORK")
+    wallIconTex:SetAllPoints(wallIconBtn)
+    wallIconTex:SetTexture("Interface\\ICONS\\inv_misc_bone_orcskull_01")
+    wallIconBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(L["STATS_WALL_BTN"] or "Wall of Shame", 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    wallIconBtn:SetScript("OnLeave", function(self)
+        GameTooltip:Hide()
+    end)
+    wallIconBtn:SetScript("OnClick", function()
+        SlashCmdList["LOOTHUNTER_WALL"]("")
+    end)
+
     local ddRaid = CreateDropdown(dropdownRow, sessionLabel)
     ddRaid:ClearAllPoints()
     ddRaid:SetPoint("LEFT", dropdownRow, "LEFT", 0, 0)
-    ddRaid:SetPoint("RIGHT", dropdownRow, "RIGHT", 0, 0)
+    ddRaid:SetPoint("RIGHT", wallIconBtn, "LEFT", -4, 0)
     ddRaid:SetHeight(22)
     if ddRaid.SetBackdropColor then
         ddRaid:SetBackdropColor(0.12, 0.12, 0.12, 1)

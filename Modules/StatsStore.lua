@@ -43,7 +43,7 @@ function StatsStore:EnsureHistoryDB()
     if not LootHunterDB or not charKey then return nil end
     if not LootHunterDB.History then LootHunterDB.History = {} end
     if not LootHunterDB.History[charKey] then
-        LootHunterDB.History[charKey] = { events = {}, counters = {}, lastWinAt = nil }
+        LootHunterDB.History[charKey] = { events = {}, counters = {}, lastWinAt = nil, lastWinLink = nil }
     end
     local hist = LootHunterDB.History[charKey]
     hist.events   = hist.events   or {}
@@ -91,7 +91,7 @@ function StatsStore:RecordHistoryEvent(kind, payload)
     hist.events[#hist.events + 1] = event
     local c = hist.counters
     if     kind == "drop"          then c.drops         = c.drops         + 1
-    elseif kind == "won"           then c.wins          = c.wins          + 1 ; hist.lastWinAt = now
+    elseif kind == "won"           then c.wins          = c.wins          + 1 ; hist.lastWinAt = now ; hist.lastWinLink = payload and payload.link or hist.lastWinLink
     elseif kind == "lost"          then c.losses        = c.losses        + 1
     elseif kind == "coin_reminder" then c.coinReminders = c.coinReminders + 1
     elseif kind == "coin_used"     then c.coinsUsed     = c.coinsUsed     + 1
@@ -111,7 +111,8 @@ function StatsStore:GetHistoryStats()
         coinReminders = c.coinReminders or 0,
         coinsUsed     = c.coinsUsed     or 0,
         bossNoLoot    = c.bossNoLoot    or 0,
-        lastWinAt     = hist and hist.lastWinAt or nil,
+        lastWinAt     = hist and hist.lastWinAt  or nil,
+        lastWinLink   = hist and hist.lastWinLink or nil,
     }
 end
 addonTable.GetHistoryStats = function() return StatsStore:GetHistoryStats() end
@@ -121,7 +122,7 @@ function StatsStore:ResetHistory()
     local charKey = addonTable.charKey
     if not LootHunterDB or not charKey then return false end
     if LootHunterDB.History then
-        LootHunterDB.History[charKey] = { events = {}, counters = {}, lastWinAt = nil }
+        LootHunterDB.History[charKey] = { events = {}, counters = {}, lastWinAt = nil, lastWinLink = nil }
     end
     self.currentHistory = nil
     self:EnsureHistoryDB()

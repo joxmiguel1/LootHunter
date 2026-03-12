@@ -1,11 +1,13 @@
 All notable changes to this project will be documented in this file.
 
 
-## v1.3
-- Miscellaneous: added "Auto-remove won items from list" option(Disabled by default)
-- Stats: added "Wall of Shame" shortcut button at the bottom of the left column in Stats tab for quick access to `/lh_wall` command.
+## v1.2.2.yendy
+- Miscellaneous: added "Auto-remove won items from list" option (Disabled by default)
+- Stats: added a Wall of Shame skull icon button to the right of the session dropdown for quick access to `/lh_wall`.
+- Stats: the `/lh_wall` dialog now shows which session will be announced below the prompt text.
 - UI: clear/delete button now shows a context menu with two options: "Delete won items" or "Delete entire list".
 - Wall of Shame: Fixed Escape/close-button behavior so closing the dialog no longer sends the message to guild automatically (sorry for that).
+- Loot detection: Gargul messages with text content (enchant, award, GDKP, "Reserved by:", etc.) are now ignored and no longer trigger false drop alerts. Gargul's pure item-link announces (ML opens boss corpse) still trigger the alert normally, preserving the `/roll` workflow.
 
 ## v1.2.1
 - Fixed: critical error in `ShowDropAlert()` when tracking drop alerts 
