@@ -83,7 +83,6 @@ function addonTable.CreateMinimapIcon()
         end
     end
 
-    -- Registrar el ícono en LibDBIcon. Él se encarga de creación, posición y arrastre.
     minimapLib:Register("LootHunter", iconData, LootHunterDB.minimap)
     EnsureMinimapIconUpdateCoord()
     if C_Timer and C_Timer.After then
