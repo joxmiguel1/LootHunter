@@ -1185,8 +1185,6 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     end
     Settings:CreateCheckbox(miscPanel, "misc.autoRemoveFromList", L["SETTING_MISC_AUTO_REMOVE_LABEL"], L["SETTING_MISC_AUTO_REMOVE_DESC"])
     Settings:CreateCheckbox(miscPanel, "lootAlerts.bossNoItems", L["SETTING_ALERTS_BOSS_NONE_LABEL"], L["SETTING_ALERTS_BOSS_NONE_DESC"])
-
-    -- Seleccionar la primera categoria por defecto
     Settings:SelectCategory(_G["LootHunter_SettingsCategory_CoinReminder"])
 
     isBuilt = true
