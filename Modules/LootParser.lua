@@ -623,7 +623,7 @@ local function HandleChatLinkAnnounce(event, msg, sender, ...)
     -- adicional alrededor del link. Bloqueamos solo esos; dejamos pasar los anuncios de drops.
     if msg:find("Gargul", 1, true) then
         local afterPrefix = msg:match("Gargul%s*:%s*(.+)") or ""
-        local textOnly = afterPrefix:gsub("|Hitem:[^|]+|h.-|h", ""):gsub("%s+", "")
+        local textOnly = afterPrefix:gsub("|Hitem:[^|]+|h.-|h", ""):gsub("|c%x+", ""):gsub("|r", ""):gsub("%s+", "")
         if textOnly ~= "" then return end   -- tiene texto → no es anuncio de drop → ignorar
     end
     for link in msg:gmatch("|Hitem:[-%d:]+|h.-|h") do
