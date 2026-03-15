@@ -182,7 +182,8 @@ local function TryResolveSourceAsync(itemID)
         LogDebug(FormatLogPrefix("EJ") .. " Intentando resolver fuente via EJ para item " .. tostring(itemID))
         local src, errFlag = ResolveSourceFromEJ(itemID)
         if errFlag == "EJ_UNAVAILABLE" then EJUnavailable = true ; return end
-        if src and src ~= "" then
+        local isZoneDrop = src and src ~= "" and src:find(L["ZONE_DROP"] or "Zone Drop", 1, true)
+        if src and src ~= "" and not (isZoneDrop and entry.manualAdd) then
             entry.boss = src
             if LootHunter_RefreshUI then LootHunter_RefreshUI() end
             if addonTable.RefreshLogPanel then addonTable.RefreshLogPanel() end
@@ -228,7 +229,7 @@ local function MaybeRefreshJournalBoss(id)
     local CurrentCharDB = addonTable.CurrentCharDB
     if not CurrentCharDB or not EncounterJournal or not EncounterJournal:IsShown() then return end
     local entry = CurrentCharDB[id]
-    if not entry then return end
+    if not entry or entry.manualAdd then return end
     local currentSource = entry.boss or ""
     if currentSource ~= "" and currentSource ~= L["UNKNOWN_SOURCE"] and not string.find(currentSource, L["ZONE_DROP"] or "Zone Drop", 1, true) then
         return

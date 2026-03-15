@@ -505,7 +505,7 @@ function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
         if MerchantFrame and MerchantFrame:IsShown() and addonTable.HighlightTrackedMerchantItems then
             addonTable.HighlightTrackedMerchantItems()
         end
-        if addonTable.MaybeRefreshJournalBoss then addonTable.MaybeRefreshJournalBoss(id) end
+        if addonTable.MaybeRefreshJournalBoss and not sourceOverride then addonTable.MaybeRefreshJournalBoss(id) end
     else
         -- Item existente: actualizar campos faltantes
         local entry = CurrentCharDB[id]
@@ -654,11 +654,46 @@ frame:RegisterEvent("LFG_PROPOSAL_SHOW")
 -- SLASH COMMANDS
 -- =============================================================
 
--- Abre la ventana principal de LootHunter
+-- Abre la ventana principal de LootHunter, o procesa subcomandos.
+-- Uso: /lh add <itemID o itemLink>
 SLASH_LOOTHUNTER1 = "/loothunter"
 SLASH_LOOTHUNTER2 = "/lh"
 SlashCmdList["LOOTHUNTER"] = function(msg)
-    LootHunter_CreateGUI()
+    local sub, rest = (msg or ""):match("^%s*(%S+)%s*(.-)%s*$")
+    if sub and sub:lower() == "add" then
+        if not CurrentCharDB then
+            print(L["CMD_NOT_INITIALIZED"])
+            return
+        end
+        if not rest or rest == "" then
+            print(L["CMD_ADD_USAGE"])
+            return
+        end
+        local itemID, itemLink = addonTable.ParseItemArg(rest)
+        if not itemID then
+            print(L["CMD_ADD_USAGE"])
+            return
+        end
+        -- Validar que el item existe antes de continuar
+        local resolvedID = C_Item.GetItemInfoInstant(itemID)
+        if not resolvedID then
+            print(L["CMD_ADD_USAGE"])
+            return
+        end
+        -- Cargar datos completos de forma asíncrona y agregar al terminar
+        local itemObj = Item:CreateFromItemID(resolvedID)
+        itemObj:ContinueOnItemLoad(function()
+            local asyncLink = itemObj:GetItemLink()
+            -- Usar el link completo si está disponible; si no, construir el string mínimo.
+            -- sourceOverride = UNKNOWN_SOURCE para ignorar el journal si está abierto.
+            AddItemToList(asyncLink or string.format("item:%d", resolvedID), nil, nil, L["UNKNOWN_SOURCE"])
+            if addonTable.CurrentCharDB and addonTable.CurrentCharDB[resolvedID] then
+                addonTable.CurrentCharDB[resolvedID].manualAdd = true
+            end
+        end)
+    else
+        LootHunter_CreateGUI()
+    end
 end
 
 -- Simula el kill de un boss (para pruebas sin entrar a instancia)
@@ -753,7 +788,6 @@ SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
         return
     end
 
-    -- Resolve current session label
     local function BuildWallPromptText()
         local _key = addonTable.SelectedSessionKey
         if not _key and addonTable.GetCurrentSessionKey then _key = addonTable.GetCurrentSessionKey() end
@@ -837,7 +871,7 @@ SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
         }
     end
 
-    -- Always update text and button labels before showing (supports locale changes and session changes)
+    -- Actualizar texto y botones antes de mostrar (soporta cambios de idioma y de sesión)
     local d = StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"]
     d.text    = BuildWallPromptText()
     d.button1 = L["STATS_WALL_CHANNEL_LOCAL"] or d.button1

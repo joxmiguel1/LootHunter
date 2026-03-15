@@ -1,7 +1,8 @@
 All notable changes to this project will be documented in this file.
+## v1.2.3 RoadBlock
+- CLI: added `/lh add <itemID or itemLink>` (also `/loothunter add`) to manually add items to the list from the command line — useful for items missing from the Dungeon Journal. Accepts a plain numeric ID or a Shift-clicked item link. (Thanks RoadBlock for suggestion and help!)
 
-
-## v1.2.2.yendy
+## v1.2.2 Yendy
 - Miscellaneous: added "Auto-remove won items from list" option (Disabled by default)
 - Stats: added a Wall of Shame skull icon button to the right of the session dropdown for quick access to `/lh_wall`.
 - Stats: the `/lh_wall` dialog now shows which session will be announced below the prompt text.
