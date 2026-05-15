@@ -273,7 +273,7 @@ local function HandleAddonLoaded(event, arg1)
     end
     if arg1 ~= addonName then return end
 
-    addonTable.version = GetAddOnMetadata(addonName, "Version") or "v1.0"
+    addonTable.version = C_AddOns.GetAddOnMetadata(addonName, "Version") or "v1.0"
     if LootHunterDB == nil then LootHunterDB = {} end
 
     InitializeSettings()
@@ -302,7 +302,7 @@ local function HandleAddonLoaded(event, arg1)
 
     -- Inicializar DB de personaje
     if not LootHunterDB.Characters then LootHunterDB.Characters = {} end
-    charKey = UnitName("player") .. " - " .. GetRealmName()
+    charKey = UnitName("player") .. " - " .. (GetRealmName and GetRealmName() or "Unknown")
     addonTable.charKey = charKey
     if not LootHunterDB.Characters[charKey] then LootHunterDB.Characters[charKey] = {} end
     CurrentCharDB = LootHunterDB.Characters[charKey]

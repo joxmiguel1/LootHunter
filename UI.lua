@@ -814,7 +814,7 @@ function LootHunter_CreateGUI()
 
     btnJournal:SetScript("OnClick", function()
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-        if not IsAddOnLoaded("Blizzard_EncounterJournal") and EncounterJournal_LoadUI then
+        if not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") and EncounterJournal_LoadUI then
             EncounterJournal_LoadUI()
         end
         if ToggleEncounterJournal then
@@ -1431,7 +1431,7 @@ function LootHunter_CreateGUI()
     end)
     emptyJournalButton:SetScript("OnClick", function()
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-        if not IsAddOnLoaded("Blizzard_EncounterJournal") and EncounterJournal_LoadUI then
+        if not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") and EncounterJournal_LoadUI then
             EncounterJournal_LoadUI()
         end
         if ToggleEncounterJournal then
@@ -1663,7 +1663,7 @@ function LootHunter_CreateGUI()
     btnGuideJournal:SetScript("OnClick", function()
         if addonTable.SelectTab then addonTable.SelectTab(1) end
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-        if not IsAddOnLoaded("Blizzard_EncounterJournal") and EncounterJournal_LoadUI then
+        if not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") and EncounterJournal_LoadUI then
             EncounterJournal_LoadUI()
         end
         if ToggleEncounterJournal then
@@ -2445,7 +2445,7 @@ function LootHunter_CreateGUI()
         if addonTable and addonTable.version then
             return addonTable.version
         end
-        local meta = GetAddOnMetadata and GetAddOnMetadata(addonName, "Version")
+        local meta = C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(addonName, "Version")
         return meta or "dev"
     end
     local versionLabel = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2776,9 +2776,9 @@ function LootHunter_RefreshUI()
         end
         if info.bisType then 
             if typeText ~= "" then typeText = typeText .. " | " end
-            typeText = typeText .. info.bisType 
+            typeText = typeText .. tostring(info.bisType)
         end
-        typeLabel:SetText(typeText)
+        typeLabel:SetText(tostring(typeText or ""))
         typeLabel:SetTextColor(1, 1, 1)
         typeLabel:EnableMouse(true)
         typeLabel:SetScript("OnMouseDown", function(self, button)

@@ -39,8 +39,8 @@ local function EnsureEJLoaded()
             return true
         end
     end
-    if not IsAddOnLoaded("Blizzard_EncounterJournal") then
-        local loaded = LoadAddOn("Blizzard_EncounterJournal")
+    if not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
+        local loaded = C_AddOns.LoadAddOn("Blizzard_EncounterJournal")
         if loaded and (EJ_GetNumInstances or EJ_GetLootInfoByItemID or
            (C_EncounterJournal and (C_EncounterJournal.GetLootInfoByItemID or C_EncounterJournal.GetLootInfo))) then
             return true
