@@ -1,5 +1,10 @@
 All notable changes to this project will be documented in this file.
 
+## v1.2.5
+
+- Fixed: `GameTooltip:SetText` missing alpha parameter in spec tooltip causing errors. Thanks RoadBlock!
+- BoE Tracker (preview-test): new optional alert detects Bind-on-Equip gear and mounts looted by anyone in a raid, showing the item name, who obtained it, and logging it in the active Stats session with a `[BoE]` badge — ideal for tracking valuable trash drops. Only gear (weapons/armor) and mounts trigger the alert; consumables, materials, and recipes are ignored. (Settings → Miscellaneous → BoE Tracker, disabled by default)
+
 ## v1.2.4
 - API: updated AddOn functions to use C_AddOns namespace for WoW 5.5.4 PTR compatibility (GetAddOnMetadata, IsAddOnLoaded, LoadAddOn)
 - API: added fallback for GetRealmName() for future-proofing

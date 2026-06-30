@@ -982,7 +982,8 @@ function LootHunter_CreateGUI()
             if value == "ALL" then label = L["FILTER_SOURCE"]
             elseif value == "SOURCE_DROP" then label = L["FILTER_BOSS"]
             elseif value == "SOURCE_TOKEN" then label = L["FILTER_TOKEN"]
-            elseif value == "SOURCE_MOUNT" then label = L["FILTER_MOUNT"] end
+            elseif value == "SOURCE_MOUNT" then label = L["FILTER_MOUNT"]
+            elseif value == "SOURCE_BOE" then label = L["FILTER_BOE"] end
             sourceFilterText:SetText(label)
             LootHunter_RefreshUI()
             parent:Hide()
@@ -1005,6 +1006,8 @@ function LootHunter_CreateGUI()
         CreateSourceMenuButton(sourceMenuFrame, L["FILTER_TOKEN"], "SOURCE_TOKEN", yPos)
         yPos = yPos - 20
         CreateSourceMenuButton(sourceMenuFrame, L["FILTER_MOUNT"], "SOURCE_MOUNT", yPos)
+        yPos = yPos - 20
+        CreateSourceMenuButton(sourceMenuFrame, L["FILTER_BOE"], "SOURCE_BOE", yPos)
         yPos = yPos - 20
         sourceMenuFrame:SetHeight(math.abs(yPos) + 5)
         sourceMenuFrame:Show()
@@ -2552,6 +2555,8 @@ function LootHunter_RefreshUI()
                 local isToken = data.slot == "RAID_TOKEN" or containsAny(bossLower, { "tier", "token", "ficha" }) or containsAny(sourceLocation, { "tier", "token", "ficha" })
                 local isMount = data.slot == "MOUNT" or containsAny(bossLower, { "mount", "riding", "montura" }) or containsAny(sourceLocation, { "mount", "riding", "montura" })
                 if not isToken and not isMount then matchSource = true end
+            elseif currentSourceFilter == "SOURCE_BOE" then
+                matchSource = (data.isBOE == true)
             end
             
             if matchType and matchSpec and matchSource then
@@ -2789,7 +2794,7 @@ function LootHunter_RefreshUI()
         end)
         typeLabel:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-            GameTooltip:SetText(L["SPEC_TOOLTIP"], 1, 1, 1, true)
+            GameTooltip:SetText(L["SPEC_TOOLTIP"], 1, 1, 1, 1, true)
             GameTooltip:Show()
         end)
         typeLabel:SetScript("OnLeave", function()
@@ -2817,6 +2822,9 @@ function LootHunter_RefreshUI()
         local displayName = baseName
         if isHeroic then
             displayName = displayName .. " |cff00ff00[H]|r"
+        end
+        if info.isBOE then
+            displayName = displayName .. " |cffa335ee[BoE]|r"
         end
 
         -- Aplicar color de estado y mantener el borde adecuado

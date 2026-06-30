@@ -503,6 +503,47 @@ local function HandleChatLoot(event, msg, ...)
         )
     end
 
+    -- Detección de BoE en raid (independiente de la wishlist)
+    -- Solo se alerta por gear (armas/armadura) y mounts; se ignoran consumibles, materiales, etc.
+    local boeSettings = LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.boeAlert
+    if boeSettings and boeSettings.enabled then
+        local inInstance, instanceType = IsInInstance()
+        if inInstance and instanceType == "raid" and not lootViaBonusRoll then
+            -- Verificar que el ítem sea equipo o mount antes de molestar
+            local isGearOrMount = false
+            if GetItemInfoInstant then
+                local _, _, _, _, _, classID, subClassID = GetItemInfoInstant(id)
+                if classID == (_G.LE_ITEM_CLASS_WEAPON or 2) or classID == (_G.LE_ITEM_CLASS_ARMOR or 4) then
+                    isGearOrMount = true
+                elseif classID == (_G.LE_ITEM_CLASS_MISCELLANEOUS or 15)
+                    and subClassID == (_G.LE_ITEM_MISCELLANEOUS_MOUNT or 0) then
+                    isGearOrMount = true
+                end
+            else
+                local equipLoc = select(9, GetItemInfo(id))
+                isGearOrMount = (equipLoc and equipLoc ~= "" and equipLoc ~= "INVTYPE_NON_EQUIP")
+            end
+
+            if isGearOrMount then
+                local bindType = select(14, GetItemInfo(id))
+                if not bindType then
+                    if C_Item and C_Item.RequestLoadItemDataByID then
+                        C_Item.RequestLoadItemDataByID(id)
+                    end
+                    GetItemInfo(id)
+                    C_Timer.After(0.8, function()
+                        local bt = select(14, GetItemInfo(id))
+                        if bt == 2 then
+                            addonTable.FireBoEAlert(id, itemLink, isMine, playerName)
+                        end
+                    end)
+                elseif bindType == 2 then
+                    addonTable.FireBoEAlert(id, itemLink, isMine, playerName)
+                end
+            end
+        end
+    end
+
     -- Lógica específica si el item está en la lista del jugador
     local itemData = CurrentCharDB[id]
     if not itemData then return end
@@ -607,6 +648,101 @@ local function HandleChatLoot(event, msg, ...)
     end
 end
 addonTable.HandleChatLoot = HandleChatLoot
+
+-- =============================================================
+-- FireBoEAlert: notifica BoE detectado en raid (alerta + sesión)
+-- =============================================================
+function addonTable.FireBoEAlert(itemID, itemLink, isMine, looterName)
+    if not itemID then return end
+
+    local itemName = select(1, GetItemInfo(itemID))
+    local quality  = select(3, GetItemInfo(itemID)) or 1
+
+    if not itemName then
+        if C_Item and C_Item.RequestLoadItemDataByID then
+            C_Item.RequestLoadItemDataByID(itemID)
+        end
+        GetItemInfo(itemID)
+        itemName = itemLink or ("Item #" .. tostring(itemID))
+    end
+
+    local displayName = itemName
+    local r, g, b = 1, 1, 1
+    if quality and GetItemQualityColor then
+        r, g, b = GetItemQualityColor(quality)
+        displayName = string.format("|cff%02x%02x%02x%s|r", r * 255, g * 255, b * 255, itemName)
+    end
+
+    local looter = looterName
+    if isMine then
+        looter = UnitName("player") or "???"
+    elseif not looter or looter == "" then
+        looter = L["UNKNOWN_SOURCE"] or "???"
+    end
+
+    local boeTag  = "|cffa335ee[BoE]|r"
+    local boeLabel = "|cffff9900(BoE)|r"
+
+    -- Resolver link si no se proporcionó (ej. en tests)
+    local resolvedLink = itemLink
+    if not resolvedLink then
+        resolvedLink = select(2, GetItemInfo(itemID))
+    end
+    if not resolvedLink and itemName then
+        local hexColor = "ffffffff"
+        if quality and GetItemQualityColor then
+            local qr, qg, qb = GetItemQualityColor(quality)
+            hexColor = string.format("ff%02x%02x%02x", qr * 255, qg * 255, qb * 255)
+        end
+        resolvedLink = "|c" .. hexColor .. "|Hitem:" .. tostring(itemID) .. "::::::::80:::::|h[" .. itemName .. "]|h|r"
+    end
+
+    -- Registrar en la sesión activa para la pestaña Stats
+    if addonTable.StatsStore and addonTable.StatsStore.AddSessionLootEntry then
+        addonTable.StatsStore:AddSessionLootEntry(
+            itemID, resolvedLink, looter,
+            nil, nil, false,
+            L["BOE_TRASH_SOURCE"] or "Trash Mob",
+            false, nil, true)
+    end
+
+    -- Registrar en historial global
+    if addonTable.StatsStore and addonTable.StatsStore.RecordHistoryEvent then
+        addonTable.StatsStore:RecordHistoryEvent("boe_detected", {
+            itemID = itemID, link = resolvedLink or itemName,
+            player = looter, source = "Trash" })
+    end
+
+    -- Mensaje en chat
+    local chatMsg = string.format("|cffff9900[Loot Hunter]|r %s %s %s %s %s",
+        boeTag, displayName,
+        L["BOE_LOOTED_BY"] or "looted by",
+        looter, boeLabel)
+    print(chatMsg)
+
+    -- Alerta visual
+    local EnqueueAlert = addonTable.EnqueueAlert
+    if EnqueueAlert then
+        EnqueueAlert(6, function()
+            local flashColor = (quality and quality >= 4) and "ORANGE" or "YELLOW"
+            if addonTable.FlashScreen then addonTable.FlashScreen(flashColor) end
+            if addonTable.ShowAlert then
+                addonTable.ShowAlert(
+                    string.format("%s\n%s\n|cffff9900%s: %s|r",
+                        boeTag, displayName,
+                        L["BOE_OBTAINED_BY"] or "Obtained by", looter),
+                    r, g, b)
+            end
+            PlaySound(8959, "Master")
+        end, 2)
+    end
+
+    -- Sonido inmediato
+    PlaySound(31577, "Master")
+
+    LogDebug(string.format("%s BoE detectado en raid: %s (id=%s) por %s",
+        FormatLogPrefix("BoE"), itemName, tostring(itemID), looter))
+end
 
 -- =============================================================
 -- HANDLECHATLINKANOUNCE: link de item en chat de raid por líderes

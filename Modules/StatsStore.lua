@@ -54,6 +54,7 @@ function StatsStore:EnsureHistoryDB()
     hist.counters.coinReminders = hist.counters.coinReminders or 0
     hist.counters.coinsUsed     = hist.counters.coinsUsed     or 0
     hist.counters.bossNoLoot    = hist.counters.bossNoLoot    or 0
+    hist.counters.boeDetected   = hist.counters.boeDetected   or 0
     self.currentHistory = hist
     return hist
 end
@@ -96,6 +97,7 @@ function StatsStore:RecordHistoryEvent(kind, payload)
     elseif kind == "coin_reminder" then c.coinReminders = c.coinReminders + 1
     elseif kind == "coin_used"     then c.coinsUsed     = c.coinsUsed     + 1
     elseif kind == "boss_no_loot"  then c.bossNoLoot    = c.bossNoLoot    + 1
+    elseif kind == "boe_detected" then c.boeDetected   = (c.boeDetected or 0) + 1
     end
     self:TrimHistory(hist)
 end
@@ -441,17 +443,17 @@ end
 -- =============================================================
 
 -- Agrega una entrada de loot a la sesión actual
-function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, rollValue, wonViaRoll, boss, isBonusLoot, rollType)
+function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, rollValue, wonViaRoll, boss, isBonusLoot, rollType, isBOE)
     local key, session = self:EnsureCurrentSession(true)
     if not key or not session then
         key, session = self:GetLateLootSessionFallback()
     end
     if not key or not session then return end
 
-    -- Ignorar items grises y blancos en el log de sesión
+    -- Ignorar items grises y blancos en el log de sesión (excepto BoE)
     if itemID and GetItemInfo then
         local _, _, quality = GetItemInfo(itemID)
-        if quality ~= nil and quality <= 1 then return end
+        if not isBOE and quality ~= nil and quality <= 1 then return end
     end
 
     local icon    = itemID and select(10, GetItemInfo(itemID)) or nil
@@ -481,6 +483,7 @@ function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, ro
         time        = now,
         boss        = boss,
         bonus       = isBonusLoot or false,
+        isBOE       = isBOE or false,
         destroyed   = false,
     }
     session.items[#session.items + 1] = entry

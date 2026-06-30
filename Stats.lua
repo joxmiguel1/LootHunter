@@ -543,7 +543,11 @@ local function BuildLootList(parent, items)
         itemFS:SetJustifyH("LEFT")
         itemFS:SetWordWrap(false)
         itemFS:SetMaxLines(1)
-        itemFS:SetText(info.name or info.link or "")
+        if info.isBOE then
+            itemFS:SetText((info.name or info.link or "") .. "  |cffa335ee[BoE]|r")
+        else
+            itemFS:SetText(info.name or info.link or "")
+        end
         itemFS:SetTextColor(0.73, 0.29, 0.93)
         SetAccentFont(itemFS, 11)
 
@@ -686,7 +690,7 @@ local function BuildLootList(parent, items)
             epicItems[#epicItems + 1] = info
         elseif quality == 3 then
             rareItems[#rareItems + 1] = info
-        elseif quality == 2 then
+        else
             uncommonItems[#uncommonItems + 1] = info
         end
     end

@@ -177,6 +177,9 @@ local function InitializeSettings()
         stats = {
             maxSessions = 25,
         },
+        boeAlert = {
+            enabled = false,
+        },
     }
     if not LootHunterDB.settings then
         LootHunterDB.settings = defaults
@@ -422,6 +425,8 @@ function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
     local name, _, quality = GetItemInfo(id)
     local equipLoc         = select(9, GetItemInfo(id))
     local icon             = select(10, GetItemInfo(id))
+    local bindType         = select(14, GetItemInfo(id))
+    local isBOE            = (bindType == 2)
     local instantEquipLoc, instantClassID, instantSubClassID = nil, nil, nil
     if GetItemInfoInstant then
         local _, _, _, instLoc, _, classID, subClassID = GetItemInfoInstant(itemLink)
@@ -493,6 +498,7 @@ function AddItemToList(itemLink, bisType, spec, sourceOverride, slotOverride)
             spec     = resolvedSpec,
             specID   = resolvedSpecID,
             isHeroic = isHeroic,
+            isBOE    = isBOE,
             status   = 0,
         }
         local displayName = name or L["LOADING"]
@@ -559,6 +565,7 @@ function addonTable.EnsureItemEntry(itemID, itemLink)
         spec     = addonTable.ResolveSpecName and addonTable.ResolveSpecName() or nil,
         specID   = addonTable.ResolveSpecID   and addonTable.ResolveSpecID()   or nil,
         isHeroic = false,
+        isBOE    = false,
         status   = 0,
     }
     return CurrentCharDB[itemID]
@@ -691,6 +698,10 @@ SlashCmdList["LOOTHUNTER"] = function(msg)
                 addonTable.CurrentCharDB[resolvedID].manualAdd = true
             end
         end)
+    elseif sub and sub:lower() == "boetest" then
+        local itemID = tonumber(rest) or 104264  -- Bracers of the Midnight Comet (BoE SoO)
+        print(string.format("|cffff9900[Loot Hunter]|r Simulando BoE con itemID=%d...", itemID))
+        addonTable.FireBoEAlert(itemID, nil, false, "TestPlayer")
     else
         LootHunter_CreateGUI()
     end

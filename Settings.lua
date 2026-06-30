@@ -81,15 +81,28 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     sidebarRightBorder:SetPoint("TOPRIGHT", 0, 0)
     sidebarRightBorder:SetPoint("BOTTOMRIGHT", 0, 0)
 
-    -- Content Area (alineado similar a la sección de Ayuda: menor margen interno)
-    local content = CreateFrame("Frame", nil, parentFrame)
+    -- Content Area con scroll para categorías con mucho contenido
+    local content = CreateFrame("ScrollFrame", nil, parentFrame, "UIPanelScrollFrameTemplate")
     content:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 10, 0)
     content:SetPoint("BOTTOMRIGHT", parentFrame, "BOTTOMRIGHT", -10, 10)
+    local contentChild = CreateFrame("Frame", nil, content)
+    content:SetScrollChild(contentChild)
+    contentChild:SetWidth(content:GetWidth() or 260)
+    contentChild:SetHeight(1)
+    content:SetScript("OnSizeChanged", function(self, width)
+        contentChild:SetWidth(width)
+        if selectedCategory and parentFrame.panels and parentFrame.panels[selectedCategory.key] then
+            local panel = parentFrame.panels[selectedCategory.key]
+            if panel:IsShown() then
+                ReflowPanel(panel)
+            end
+        end
+    end)
     
     -- Ayuda para ajustar anchos dinamicamente
     local function LayoutPanel(panel)
         if not panel or not panel._layout then return end
-        local y = -(panel._topPadding or 50)
+        local y = -(panel._topPadding or 0)
         local rowSpacing = panel._rowSpacing or 12
         local function FallbackHeight(fontString, minLines)
             if not fontString then return 0 end
@@ -163,6 +176,9 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
             end
         end
         LayoutPanel(panel)
+        if panel:IsShown() and contentChild then
+            contentChild:SetHeight(math.abs(panel._lastY or 0) + 20)
+        end
     end
 
     local function CreateSectionHeader(panel, text, afterSpacing)
@@ -270,11 +286,13 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         if parentFrame.panels[categoryButton.key] then
             local panel = parentFrame.panels[categoryButton.key]
             panel:Show()
+            content:SetVerticalScroll(0)
             ReflowPanel(panel)
             if C_Timer and C_Timer.After then
                 C_Timer.After(0, function()
                     if panel and panel:IsShown() then
                         ReflowPanel(panel)
+                        content:SetVerticalScroll(0)
                     end
                 end)
             end
@@ -307,19 +325,23 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
         nextCategoryY = nextCategoryY - button:GetHeight() - 5
 
         -- Crear un panel para esta categoria
-        local panel = CreateFrame("Frame", "LootHunter_SettingsPanel_"..key, content)
-        panel:SetAllPoints(content)
+        local panel = CreateFrame("Frame", "LootHunter_SettingsPanel_"..key, contentChild)
+        panel:SetPoint("TOPLEFT", contentChild, "TOPLEFT", 0, 0)
+        panel:SetPoint("RIGHT", contentChild, "RIGHT", 0, 0)
         panel:Hide()
         parentFrame.panels[key] = panel
 
         -- Agregar un titulo al panel
         panel._layout = {}
-        panel._topPadding = 50
+        panel._topPadding = 0
         panel._rowSpacing = 1
 
-        local panelTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-        panelTitle:SetPoint("TOPLEFT", 10, -15)
-        panelTitle:SetWidth((panel:GetWidth() or 0) - 20)
+        local titleEntryFrame = CreateFrame("Frame", nil, panel)
+        titleEntryFrame:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+        titleEntryFrame:SetPoint("RIGHT", panel, "RIGHT", 0, 0)
+        local panelTitle = titleEntryFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+        panelTitle:SetPoint("TOPLEFT", titleEntryFrame, "TOPLEFT", 10, -10)
+        panelTitle:SetPoint("RIGHT", titleEntryFrame, "RIGHT", -10, 0)
         panelTitle:SetJustifyH("LEFT")
         panelTitle:SetWordWrap(true)
         panelTitle:SetText(name)
@@ -327,6 +349,12 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
             local pr, pg, pb = GetPrimaryColor()
             panelTitle:SetTextColor(pr, pg, pb)
         end
+        table.insert(panel._layout, {
+            frame = titleEntryFrame,
+            label = panelTitle,
+            extraHeight = 4,
+            afterSpacing = 4,
+        })
         panel._title = panelTitle
         panel:SetScript("OnSizeChanged", ReflowPanel)
         ReflowPanel(panel)
@@ -1185,6 +1213,8 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     end
     Settings:CreateCheckbox(miscPanel, "misc.autoRemoveFromList", L["SETTING_MISC_AUTO_REMOVE_LABEL"], L["SETTING_MISC_AUTO_REMOVE_DESC"])
     Settings:CreateCheckbox(miscPanel, "lootAlerts.bossNoItems", L["SETTING_ALERTS_BOSS_NONE_LABEL"], L["SETTING_ALERTS_BOSS_NONE_DESC"])
+    CreateSectionHeader(miscPanel, L["BOE_ALERT_SETTINGS"] .. " (test)", -4)
+    Settings:CreateCheckbox(miscPanel, "boeAlert.enabled", L["SETTING_BOE_ENABLE_LABEL"], L["SETTING_BOE_ENABLE_DESC"])
     Settings:SelectCategory(_G["LootHunter_SettingsCategory_CoinReminder"])
 
     isBuilt = true
