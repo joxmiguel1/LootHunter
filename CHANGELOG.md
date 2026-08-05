@@ -1,5 +1,11 @@
 All notable changes to this project will be documented in this file.
 
+## v1.2.6 Jerryments
+
+- Wall of Shame: replaced the channel-selection popup with a resizable copy-friendly window. (thanks for the suggestion Jerryments!)
+- BoE Tracker: added minimum-quality dropdown (Uncommon/Rare/Epic, default Rare) so you can choose which BoE quality triggers the alert.
+- Encoding: fixed double-UTF-8 corruption across all source files :S
+
 ## v1.2.5
 
 - Fixed: `GameTooltip:SetText` missing alpha parameter in spec tooltip causing errors. Thanks RoadBlock!

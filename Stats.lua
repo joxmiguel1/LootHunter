@@ -1,4 +1,4 @@
-local _, addonTable = ...
+﻿local _, addonTable = ...
 local L = addonTable.L
 
 local ACCENT_FONT = "Interface\\AddOns\\LootHunter\\Fonts\\Prototype.ttf"
@@ -229,7 +229,33 @@ local function GetWallOfShame(session)
     local deathName, deathCount = topEntry(deaths)
     local reviveName, reviveCount = topEntry(revives)
     local deadTimeName, deadTimeSeconds = topEntry(deadTime)
-    return deathName, deathCount, reviveName, reviveCount, deadTimeName, deadTimeSeconds
+
+    -- Death-per-Loot Ratio: jugador con peor proporción muertes/items
+    local ratioName, ratioDeaths, ratioItems = nil, 0, 0
+    local bestRatio = 0
+    local perPlayer = session and session.perPlayer or {}
+    for name, dCount in pairs(deaths) do
+        local d = dCount or 0
+        if d > 0 then
+            local itemsWon = perPlayer[name] and perPlayer[name].count or 0
+            local ratio = itemsWon > 0 and (d / itemsWon) or d
+            if ratio > bestRatio then
+                bestRatio = ratio
+                ratioName = name
+                ratioDeaths = d
+                ratioItems = itemsWon
+            end
+        end
+    end
+
+    -- First Blood: primera muerte de la sesión
+    local firstBloodName = session and session.firstDeath and session.firstDeath.name or nil
+
+    return deathName, deathCount,
+           reviveName, reviveCount,
+           deadTimeName, deadTimeSeconds,
+           ratioName, ratioDeaths, ratioItems,
+           firstBloodName
 end
 
 local function FormatDeadTime(seconds)
@@ -252,8 +278,32 @@ local function BuildWallOfShameLines(session)
         local label = session.label or string.format("%s #%d - %s", raidName, idx, dateStr ~= "" and dateStr or "N/A")
         table.insert(lines, label)
     end
+    local sep = "======================"
+    table.insert(lines, sep)
     table.insert(lines, tostring(L["STATS_ANNOUNCE_GUILD_WALL"] or "*** WALL OF SHAME ***"))
-    local deathName, deathCount, reviveName, reviveCount, deadTimeName, deadTimeSeconds = GetWallOfShame(session)
+    table.insert(lines, sep)
+
+    local deathName, deathCount,
+          reviveName, reviveCount,
+          deadTimeName, deadTimeSeconds,
+          ratioName, ratioDeaths, ratioItems,
+          firstBloodName = GetWallOfShame(session)
+
+    -- First Blood
+    table.insert(lines, string.format(L["STATS_WALL_FIRSTBLOOD"] or "First Blood - %s", firstBloodName or "N/A"))
+
+    -- Death-per-Loot Ratio
+    if ratioName and ratioDeaths > 0 then
+        if ratioItems > 0 then
+            local ratioStr = string.format("%.1f", ratioDeaths / ratioItems)
+            table.insert(lines, string.format(L["STATS_WALL_RATIO"] or "Worst death/loot ratio - %s (%s deaths, %d items = %s/loot)",
+                ratioName, ratioDeaths, ratioItems, ratioStr))
+        else
+            table.insert(lines, string.format(L["STATS_WALL_RATIO_ZERO"] or "Worst death/loot ratio - %s (%s deaths, 0 items)",
+                ratioName, ratioDeaths))
+        end
+    end
+
     table.insert(lines, string.format(L["STATS_WALL_DEATHS"] or "Most time death - %s (%s)", deathName or "N/A", deathCount or 0))
     table.insert(lines, string.format(L["STATS_WALL_REVIVES"] or "More times revived - %s (%s)", reviveName or "N/A", reviveCount or 0))
     table.insert(lines, string.format(L["STATS_WALL_DEADTIME"] or "Most time dead - %s (%s)", deadTimeName or "N/A", FormatDeadTime(deadTimeSeconds)))
@@ -794,9 +844,6 @@ local function BuildStatsPanel(frame)
         end)
     end
 
-    -- (Wall of Shame button is now placed next to the session dropdown in the right column)
-
-    -- Contexto de sesión
     local sessionList = EnsureSessionSelection()
     addonTable.SelectedSessionKey = selectedSessionKey
     local sessionKey = selectedSessionKey
@@ -850,7 +897,6 @@ local function BuildStatsPanel(frame)
         return btn
     end
 
-    -- Skull icon button that triggers Wall of Shame, anchored to the right of the dropdown row
     local wallIconBtn = CreateFrame("Button", nil, dropdownRow)
     wallIconBtn:SetSize(22, 22)
     wallIconBtn:SetPoint("RIGHT", dropdownRow, "RIGHT", 0, 0)
@@ -897,11 +943,42 @@ local function BuildStatsPanel(frame)
     end)
 
     local lootHeader = colRight:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    lootHeader:SetPoint("TOP", dropdownRow, "BOTTOM", 0, -10)
+    lootHeader:SetPoint("TOPLEFT", dropdownRow, "BOTTOMLEFT", 0, -10)
     lootHeader:SetText(L["STATS_LOOT_HISTORY"] or "Loot history")
     SetAccentFont(lootHeader, 12, "OUTLINE")
 
-    -- Contenedor oscuro placeholder para loot (sin contenido)
+    local boeCount = 0
+    if sessionItems then
+        for _, item in ipairs(sessionItems) do
+            if item.isBOE then boeCount = boeCount + 1 end
+        end
+    end
+
+    local boeFilterText = colRight:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    boeFilterText:SetPoint("RIGHT", colRight, "RIGHT", -20, 0)
+    boeFilterText:SetPoint("TOP", lootHeader, "TOP", 0, -1)
+    boeFilterText:SetText((L["FILTER_BOE"] or "BoE") .. " (" .. boeCount .. ")")
+    boeFilterText:SetTextColor(0.6, 0.6, 0.6)
+    SetAccentFont(boeFilterText, 11)
+
+    local boeFilterBtn = CreateFrame("CheckButton", nil, colRight, "UICheckButtonTemplate")
+    boeFilterBtn:SetSize(16, 16)
+    boeFilterBtn:SetPoint("RIGHT", boeFilterText, "LEFT", -2, 0)
+    boeFilterBtn:SetPoint("TOP", lootHeader, "TOP", 0, 2)
+    boeFilterBtn:SetChecked(frame._boeFilter or false)
+    boeFilterBtn:SetScript("OnClick", function(self)
+        frame._boeFilter = self:GetChecked()
+        BuildStatsPanel(frame)
+    end)
+    boeFilterBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(L["FILTER_BOE_TOOLTIP"] or "Show only BoE drops", 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    boeFilterBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
     local lootContainer = CreateFrame("Frame", nil, colRight, "BackdropTemplate")
     lootContainer:SetPoint("TOP", lootHeader, "BOTTOM", 0, -8)
     lootContainer:SetPoint("LEFT", colRight, "LEFT", 0, 0)
@@ -909,7 +986,16 @@ local function BuildStatsPanel(frame)
     lootContainer:SetHeight(300)
     SafeSetBackdrop(lootContainer, { bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 }, { 0, 0, 0, 0.5 }, { 0, 0, 0, 0.8 })
 
-    BuildLootList(lootContainer, sessionItems)
+    local displayItems = sessionItems
+    if frame._boeFilter and sessionItems then
+        displayItems = {}
+        for _, item in ipairs(sessionItems) do
+            if item.isBOE then
+                displayItems[#displayItems + 1] = item
+            end
+        end
+    end
+    BuildLootList(lootContainer, displayItems)
 
 end
 
@@ -938,38 +1024,133 @@ addonTable.AnnounceWallOfShame = function(channel, sessionKey)
         return
     end
     local lines = BuildWallOfShameLines(session)
-    local function SanitizeForChat(text)
-        text = tostring(text or "")
-        text = text:gsub("|T.-|t", "{skull}")
-        return text
+    local text = table.concat(lines, "\n")
+    if addonTable.ShowWallCopyFrame then
+        addonTable.ShowWallCopyFrame(text, lines)
+    else
+        for _, line in ipairs(lines) do
+            print(line)
+        end
     end
-    local sendChannel = channel and tostring(channel):upper() or "LOCAL"
-    if sendChannel ~= "LOCAL" then
+end
+
+local wallCopyFrame = nil
+addonTable.ShowWallCopyFrame = function(text, lines)
+    if wallCopyFrame then
+        wallCopyFrame:Hide()
+        wallCopyFrame = nil
+    end
+    local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    f:SetSize(420, 320)
+    f:SetPoint("CENTER")
+    f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+    f:SetBackdropColor(0.08, 0.08, 0.08, 0.95)
+    f:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function() f:StartMoving() end)
+    f:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
+    f:SetFrameStrata("FULLSCREEN")
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", f, "TOP", 0, -10)
+    title:SetText(L["STATS_WALL_BTN"] or "Wall of Shame")
+
+    local sf = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -36)
+    sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -34, 40)
+
+    local eb = CreateFrame("EditBox", nil, f)
+    eb:SetMultiLine(true)
+    eb:SetFontObject(GameFontHighlight)
+    eb:SetText(text)
+    eb:SetAutoFocus(false)
+    eb:SetScript("OnEscapePressed", function() f:Hide() end)
+    sf:SetScrollChild(eb)
+    eb:SetWidth(sf:GetWidth() - 4)
+    eb:SetHeight(sf:GetHeight())
+
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, function()
+            eb:SetFocus()
+            eb:HighlightText()
+        end)
+    end
+
+    local guildBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    guildBtn:SetSize(120, 24)
+    guildBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, 10)
+    guildBtn:SetText("Send to Guild")
+    guildBtn:SetScript("OnClick", function()
         if not (IsInGuild and IsInGuild()) then
-            if sendChannel == "GUILD" then
-                print(L["STATS_ANNOUNCE_NO_GUILD"] or "You are not in a guild.")
-                return
-            end
+            print(L["STATS_ANNOUNCE_NO_GUILD"] or "You are not in a guild.")
+            return
+        end
+        if not lines then return end
+        local sanitizedLines = {}
+        for _, line in ipairs(lines) do
+            local sanitized = tostring(line or "")
+            sanitized = sanitized:gsub("|T.-|t", "{skull}")
+            sanitizedLines[#sanitizedLines + 1] = sanitized
         end
         if C_Timer and C_Timer.After then
-            for i, line in ipairs(lines) do
-                C_Timer.After((i - 1) * 0.2, function()
-                    SendChatMessage(SanitizeForChat(line), sendChannel)
+            for i, line in ipairs(sanitizedLines) do
+                C_Timer.After((i - 1) * 0.3, function()
+                    SendChatMessage(line, "GUILD")
                 end)
             end
         else
-            for _, line in ipairs(lines) do
-                SendChatMessage(SanitizeForChat(line), sendChannel)
+            for _, line in ipairs(sanitizedLines) do
+                SendChatMessage(line, "GUILD")
             end
         end
         print(L["STATS_ANNOUNCE_SENT"] or "Announcement sent to guild.")
-    else
+    end)
+
+    local partyBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    partyBtn:SetSize(120, 24)
+    partyBtn:SetPoint("LEFT", guildBtn, "RIGHT", 4, 0)
+    partyBtn:SetText("Send to Raid")
+    partyBtn:SetScript("OnClick", function()
+        local inRaid = (IsInRaid and IsInRaid() and true) or (GetNumRaidMembers and GetNumRaidMembers() > 0) or false
+        if not inRaid then
+            print(L["STATS_ANNOUNCE_NO_RAID"] or "You are not in a raid.")
+            return
+        end
+        if not lines then return end
+        local sanitizedLines = {}
         for _, line in ipairs(lines) do
-            if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-                DEFAULT_CHAT_FRAME:AddMessage(line)
-            else
-                print(line)
+            local sanitized = tostring(line or "")
+            sanitized = sanitized:gsub("|T.-|t", "{skull}")
+            sanitizedLines[#sanitizedLines + 1] = sanitized
+        end
+        if C_Timer and C_Timer.After then
+            for i, line in ipairs(sanitizedLines) do
+                C_Timer.After((i - 1) * 0.3, function()
+                    SendChatMessage(line, "RAID")
+                end)
+            end
+        else
+            for _, line in ipairs(sanitizedLines) do
+                SendChatMessage(line, "RAID")
             end
         end
-    end
+        print(L["STATS_ANNOUNCE_SENT"] or "Announcement sent.")
+    end)
+
+    local copyBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    copyBtn:SetSize(100, 24)
+    copyBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 10)
+    copyBtn:SetText("Copy")
+    copyBtn:SetScript("OnClick", function()
+        eb:SetFocus()
+        eb:HighlightText()
+    end)
+
+    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+    closeBtn:SetScript("OnClick", function() f:Hide() end)
+    f:SetScript("OnHide", function() wallCopyFrame = nil end)
+    wallCopyFrame = f
 end

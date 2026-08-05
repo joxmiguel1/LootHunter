@@ -1,5 +1,5 @@
--- =============================================================
--- LootHunter.lua — Núcleo del addon (archivo principal)
+﻿-- =============================================================
+-- LootHunter.lua â€” Núcleo del addon (archivo principal)
 -- Contiene: inicialización, sistema de alertas, AddItemToList,
 -- manejadores de eventos principales y slash commands.
 -- Los sistemas específicos están en Modules/*.lua
@@ -140,7 +140,7 @@ end
 addonTable.ShowDropAlert = ShowDropAlert
 
 -- =============================================================
--- CONFIGURACIÓN POR DEFECTO (settings)
+-- CONFIGURACI"N POR DEFECTO (settings)
 -- =============================================================
 local function InitializeSettings()
     local defaults = {
@@ -179,6 +179,7 @@ local function InitializeSettings()
         },
         boeAlert = {
             enabled = false,
+            minQuality = 3,
         },
     }
     if not LootHunterDB.settings then
@@ -791,103 +792,8 @@ end
 SLASH_LOOTHUNTER_WALL1 = "/lh_wall"
 SlashCmdList["LOOTHUNTER_WALL"] = function(msg)
     if not addonTable or not addonTable.AnnounceWallOfShame then
-        print("[Loot Hunter] Wall of shame no está disponible.")
+        print("[Loot Hunter] Wall of shame not available.")
         return
     end
-    if not StaticPopupDialogs then
-        addonTable.AnnounceWallOfShame("LOCAL")
-        return
-    end
-
-    local function BuildWallPromptText()
-        local _key = addonTable.SelectedSessionKey
-        if not _key and addonTable.GetCurrentSessionKey then _key = addonTable.GetCurrentSessionKey() end
-        if not _key and addonTable.GetLatestSessionKey  then _key = addonTable.GetLatestSessionKey()  end
-        local sessionLabel = nil
-        if _key and addonTable.GetSessionByKey then
-            local _session = addonTable.GetSessionByKey(_key)
-            if _session then
-                local _raidName = _session.raidName or "Raid"
-                local _idx      = _session.sessionIndex or 1
-                local _dateStr  = (_session.startedAt and type(date) == "function") and date("%m/%d/%Y", _session.startedAt) or ""
-                sessionLabel = _session.label or string.format("%s #%d - %s", _raidName, _idx, _dateStr ~= "" and _dateStr or "N/A")
-            end
-        end
-        local promptText = L["STATS_WALL_CHANNEL_PROMPT"] or "Where do you want to announce the Wall of Shame?"
-        if sessionLabel then
-            promptText = promptText .. "\n\n" .. string.format(L["STATS_WALL_SESSION_LABEL"] or "Session: %s", sessionLabel)
-        end
-        return promptText
-    end
-
-    if not StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"] then
-        StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"] = {
-            text    = BuildWallPromptText(),
-            button1 = L["STATS_WALL_CHANNEL_LOCAL"]  or "Local",
-            button2 = L["STATS_WALL_CHANNEL_GUILD"]  or "Guild",
-            button3 = L["STATS_WALL_CHANNEL_RAID"]   or "Raid",
-            OnAccept = function() addonTable.AnnounceWallOfShame("LOCAL") end,
-            OnCancel = function() end,
-            OnAlt    = function() addonTable.AnnounceWallOfShame("RAID")  end,
-            OnShow = function(self)
-                self:SetHeight(165)
-
-                if self.text then
-                    self.text:ClearAllPoints()
-                    self.text:SetPoint("TOP", self, "TOP", 0, -22)
-                    self.text:SetPoint("LEFT", self, "LEFT", 28, 0)
-                    self.text:SetPoint("RIGHT", self, "RIGHT", -28, 0)
-                end
-
-                if self.button1 then
-                    self.button1:ClearAllPoints()
-                    self.button1:SetPoint("BOTTOMLEFT", self, "BOTTOMLEFT", 32, 22)
-                    self.button1:SetWidth(168)
-                end
-
-                if self.button2 then
-                    self.button2:ClearAllPoints()
-                    self.button2:SetPoint("BOTTOM", self, "BOTTOM", 0, 22)
-                    self.button2:SetWidth(168)
-                    self.button2:SetScript("OnClick", function()
-                        StaticPopup_Hide("LOOTHUNTER_WALL_CHANNEL")
-                        addonTable.AnnounceWallOfShame("GUILD")
-                    end)
-                end
-
-                if self.button3 then
-                    self.button3:ClearAllPoints()
-                    self.button3:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -32, 22)
-                    self.button3:SetWidth(168)
-                end
-
-                if not self.lhCloseButton then
-                    local closeButton = CreateFrame("Button", nil, self, "UIPanelCloseButton")
-                    closeButton:SetPoint("TOPRIGHT", self, "TOPRIGHT", -4, -4)
-                    closeButton:SetScript("OnClick", function()
-                        StaticPopup_Hide("LOOTHUNTER_WALL_CHANNEL")
-                    end)
-                    self.lhCloseButton = closeButton
-                end
-
-                self.lhCloseButton:Show()
-            end,
-            OnHide = function(self)
-                if self.lhCloseButton then self.lhCloseButton:Hide() end
-            end,
-            timeout        = 0,
-            whileDead      = true,
-            hideOnEscape   = true,
-            preferredIndex = 3,
-        }
-    end
-
-    -- Actualizar texto y botones antes de mostrar (soporta cambios de idioma y de sesión)
-    local d = StaticPopupDialogs["LOOTHUNTER_WALL_CHANNEL"]
-    d.text    = BuildWallPromptText()
-    d.button1 = L["STATS_WALL_CHANNEL_LOCAL"] or d.button1
-    d.button2 = L["STATS_WALL_CHANNEL_GUILD"] or d.button2
-    d.button3 = L["STATS_WALL_CHANNEL_RAID"]  or d.button3
-
-    StaticPopup_Show("LOOTHUNTER_WALL_CHANNEL")
+    addonTable.AnnounceWallOfShame("LOCAL")
 end

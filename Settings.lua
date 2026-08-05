@@ -1,4 +1,4 @@
-local addonName, addonTable = ...
+﻿local addonName, addonTable = ...
 local L = addonTable.L
 local StatsStore = addonTable.StatsStore
 
@@ -1213,8 +1213,34 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
     end
     Settings:CreateCheckbox(miscPanel, "misc.autoRemoveFromList", L["SETTING_MISC_AUTO_REMOVE_LABEL"], L["SETTING_MISC_AUTO_REMOVE_DESC"])
     Settings:CreateCheckbox(miscPanel, "lootAlerts.bossNoItems", L["SETTING_ALERTS_BOSS_NONE_LABEL"], L["SETTING_ALERTS_BOSS_NONE_DESC"])
-    CreateSectionHeader(miscPanel, L["BOE_ALERT_SETTINGS"] .. " (test)", -4)
+    CreateSectionHeader(miscPanel, L["BOE_ALERT_SETTINGS"], -4)
     Settings:CreateCheckbox(miscPanel, "boeAlert.enabled", L["SETTING_BOE_ENABLE_LABEL"], L["SETTING_BOE_ENABLE_DESC"])
+
+    local function GetBoeMinQuality()
+        return addonTable.db and addonTable.db.settings and addonTable.db.settings.boeAlert
+            and tonumber(addonTable.db.settings.boeAlert.minQuality) or 3
+    end
+    local function SetBoeMinQuality(value)
+        if not (addonTable.db and addonTable.db.settings and addonTable.db.settings.boeAlert) then return end
+        local v = tonumber(value) or 3
+        if v < 0 then v = 0 end
+        if v > 7 then v = 7 end
+        addonTable.db.settings.boeAlert.minQuality = v
+    end
+    local boeQualityOptions = {
+        { value = 2, label = L["SETTING_BOE_QUALITY_UNCOMMON"] },
+        { value = 3, label = L["SETTING_BOE_QUALITY_RARE"] },
+        { value = 4, label = L["SETTING_BOE_QUALITY_EPIC"] },
+    }
+    CreateDropdownRow(
+        miscPanel,
+        L["SETTING_BOE_MIN_QUALITY_LABEL"],
+        boeQualityOptions,
+        GetBoeMinQuality,
+        SetBoeMinQuality,
+        L["SETTING_BOE_MIN_QUALITY_DESC"]
+    )
+
     Settings:SelectCategory(_G["LootHunter_SettingsCategory_CoinReminder"])
 
     isBuilt = true

@@ -1,2 +1,11 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Lua files: UTF-8 (no BOM), CRLF line endings for WoW compatibility
+*.lua text working-tree-encoding=UTF-8 eol=crlf
+
+# TOC files: UTF-8, CRLF
+*.toc text working-tree-encoding=UTF-8 eol=crlf
+
+# Markdown: UTF-8, LF
+*.md text working-tree-encoding=UTF-8 eol=lf

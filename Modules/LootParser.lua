@@ -1,4 +1,4 @@
--- =============================================================
+﻿-- =============================================================
 -- Módulo: LootParser.lua
 -- Parseo de mensajes de chat de loot y rolls.
 -- Gestión de patrones de loot, detección de Need/Greed/Pass,
@@ -218,7 +218,7 @@ local globalChatFilterActive = false
 
 -- Filtro aplicado a CHAT_MSG_CHANNEL.
 -- CHAT_MSG_CHANNEL solo recibe canales numerados públicos (General, Comercio,
--- Defensa, LFG, etc.) — nunca raid, party, guild ni officer.
+-- Defensa, LFG, etc.) â€” nunca raid, party, guild ni officer.
 -- Si el filtro está activo simplemente bloqueamos el mensaje.
 local function GlobalChatFilter(self, event, msg, sender, language,
                                  channelString, target, flags, zoneID,
@@ -504,7 +504,6 @@ local function HandleChatLoot(event, msg, ...)
     end
 
     -- Detección de BoE en raid (independiente de la wishlist)
-    -- Solo se alerta por gear (armas/armadura) y mounts; se ignoran consumibles, materiales, etc.
     local boeSettings = LootHunterDB and LootHunterDB.settings and LootHunterDB.settings.boeAlert
     if boeSettings and boeSettings.enabled then
         local inInstance, instanceType = IsInInstance()
@@ -525,6 +524,15 @@ local function HandleChatLoot(event, msg, ...)
             end
 
             if isGearOrMount then
+                local minQuality = tonumber(boeSettings.minQuality) or 3
+                local function PassesQualityFilter(checkItemID, checkItemLink)
+                    local q = select(3, GetItemInfo(checkItemID))
+                    if (not q or q < 1) and addonTable.GetQualityFromLink then
+                        q = addonTable.GetQualityFromLink(checkItemLink or itemLink)
+                    end
+                    if not q then return true end
+                    return q >= minQuality
+                end
                 local bindType = select(14, GetItemInfo(id))
                 if not bindType then
                     if C_Item and C_Item.RequestLoadItemDataByID then
@@ -533,11 +541,11 @@ local function HandleChatLoot(event, msg, ...)
                     GetItemInfo(id)
                     C_Timer.After(0.8, function()
                         local bt = select(14, GetItemInfo(id))
-                        if bt == 2 then
+                        if bt == 2 and PassesQualityFilter(id, itemLink) then
                             addonTable.FireBoEAlert(id, itemLink, isMine, playerName)
                         end
                     end)
-                elseif bindType == 2 then
+                elseif bindType == 2 and PassesQualityFilter(id, itemLink) then
                     addonTable.FireBoEAlert(id, itemLink, isMine, playerName)
                 end
             end
@@ -760,7 +768,7 @@ local function HandleChatLinkAnnounce(event, msg, sender, ...)
     if msg:find("Gargul", 1, true) then
         local afterPrefix = msg:match("Gargul%s*:%s*(.+)") or ""
         local textOnly = afterPrefix:gsub("|Hitem:[^|]+|h.-|h", ""):gsub("|c%x+", ""):gsub("|r", ""):gsub("%s+", "")
-        if textOnly ~= "" then return end   -- tiene texto → no es anuncio de drop → ignorar
+        if textOnly ~= "" then return end   -- tiene texto â†’ no es anuncio de drop â†’ ignorar
     end
     for link in msg:gmatch("|Hitem:[-%d:]+|h.-|h") do
         local itemID = tonumber(link:match("item:(%d+):"))

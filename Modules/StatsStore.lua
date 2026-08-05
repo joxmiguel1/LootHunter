@@ -209,6 +209,7 @@ function StatsStore:StartSession(raidName, difficultyName, instanceID)
         revives      = {},
         deadTime     = {},
         deathStart   = {},
+        firstDeath   = nil,
         label        = self:BuildSessionLabel(raidName, idx, startedAt),
     }
     self.currentSessionKey = key
@@ -402,6 +403,9 @@ function StatsStore:AddDeath(name)
     session.deaths[name] = (session.deaths[name] or 0) + 1
     if not session.deathStart[name] then
         session.deathStart[name] = NowSeconds()
+    end
+    if not session.firstDeath then
+        session.firstDeath = { name = name, time = NowSeconds() }
     end
 end
 
