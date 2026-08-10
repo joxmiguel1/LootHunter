@@ -1,4 +1,4 @@
-﻿-- =============================================================
+-- =============================================================
 -- Módulo: LootParser.lua
 -- Parseo de mensajes de chat de loot y rolls.
 -- Gestión de patrones de loot, detección de Need/Greed/Pass,
@@ -286,8 +286,9 @@ local function HandleInstanceChange(event)
     local inInstance, instanceType = IsInInstance()
     local inRaid           = IsInRaid and IsInRaid() or false
     local inRaidInstance   = inInstance and instanceType == "raid"
+    local canStartNewSession = (event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA")
     if inRaidInstance or inRaid then
-        StatsStore:EnsureCurrentSession(true)
+        StatsStore:EnsureCurrentSession(canStartNewSession)
     else
         StatsStore:CloseCurrentSession("left_instance")
     end

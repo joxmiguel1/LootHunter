@@ -1,4 +1,4 @@
-﻿-- =============================================================
+-- =============================================================
 -- LootHunter.lua â€” Núcleo del addon (archivo principal)
 -- Contiene: inicialización, sistema de alertas, AddItemToList,
 -- manejadores de eventos principales y slash commands.
@@ -606,11 +606,11 @@ local eventHandlers = {
     PLAYER_SPECIALIZATION_CHANGED = function(...) if addonTable.HandleSpecChange       then addonTable.HandleSpecChange(...)        end end,
     ACTIVE_TALENT_GROUP_CHANGED = function(...) if addonTable.HandleSpecChange         then addonTable.HandleSpecChange(...)        end end,
     PLAYER_TALENT_UPDATE        = function(...) if addonTable.HandleSpecChange         then addonTable.HandleSpecChange(...)        end end,
-    GROUP_ROSTER_UPDATE         = function(...) if addonTable.HandleInstanceChange     then addonTable.HandleInstanceChange(...)    end end,
+    GROUP_ROSTER_UPDATE         = function(...) if addonTable.HandleInstanceChange     then addonTable.HandleInstanceChange("GROUP_ROSTER_UPDATE")     end end,
     MERCHANT_SHOW               = function(...) if addonTable.HandleMerchantEvent      then addonTable.HandleMerchantEvent(...)     end end,
     MERCHANT_UPDATE             = function(...) if addonTable.HandleMerchantEvent      then addonTable.HandleMerchantEvent(...)     end end,
-    PLAYER_ENTERING_WORLD       = function(...) if addonTable.HandleInstanceChange     then addonTable.HandleInstanceChange(...)    end end,
-    ZONE_CHANGED_NEW_AREA       = function(...) if addonTable.HandleInstanceChange     then addonTable.HandleInstanceChange(...)    end end,
+    PLAYER_ENTERING_WORLD       = function(...) if addonTable.HandleInstanceChange     then addonTable.HandleInstanceChange("PLAYER_ENTERING_WORLD")   end end,
+    ZONE_CHANGED_NEW_AREA       = function(...) if addonTable.HandleInstanceChange     then addonTable.HandleInstanceChange("ZONE_CHANGED_NEW_AREA")   end end,
     LFG_QUEUE_STATUS_UPDATE     = function(...) if addonTable.HandleLFGQueueUpdate     then addonTable.HandleLFGQueueUpdate(...)    end end,
     LFG_UPDATE                  = function(...) if addonTable.HandleLFGQueueUpdate     then addonTable.HandleLFGQueueUpdate(...)    end end,
     LFG_PROPOSAL_SHOW           = function(...) if addonTable.HandleLFGQueueUpdate     then addonTable.HandleLFGQueueUpdate(...)    end end,
