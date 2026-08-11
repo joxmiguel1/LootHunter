@@ -290,7 +290,6 @@ local function HandleInstanceChange(event)
     if inRaidInstance or inRaid then
         StatsStore:EnsureCurrentSession(canStartNewSession)
     else
-        StatsStore:CloseCurrentSession("left_instance")
     end
     UpdateRaidChatFilter()
 end

@@ -745,8 +745,24 @@ SlashCmdList["LOOTHUNTER_DROP"] = function(msg)
         return
     end
     local entry = addonTable.EnsureItemEntry(itemID, itemLink)
-    ShowDropAlert(itemID, entry)
-    if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+    if not entry then return end
+    -- Replicar el flujo real de HandleLootEvent: solo para testing
+    if entry.status == 0 then
+        entry.status = 1
+        if addonTable.MarkRecentDrop then addonTable.MarkRecentDrop(itemID) end
+        ShowDropAlert(itemID, entry)
+        if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+        local capturedID = itemID
+        C_Timer.After(120, function()
+            if CurrentCharDB and CurrentCharDB[capturedID] and CurrentCharDB[capturedID].status == 1 then
+                CurrentCharDB[capturedID].status = 0
+                if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+            end
+        end)
+    else
+        ShowDropAlert(itemID, entry)
+        if LootHunter_RefreshUI then LootHunter_RefreshUI() end
+    end
 end
 
 -- Marca un item como obtenido manualmente
