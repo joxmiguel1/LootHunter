@@ -76,6 +76,12 @@ local function BuildOtherLootPatterns()
         { pattern = "^(.+) receives loot: (.+)$",        isBonusRoll = false },
         { pattern = "^(.+) receives loot: (.+) x%d+%.$", isBonusRoll = false },
         { pattern = "^(.+) recibe: (.+)%.$",             isBonusRoll = false },
+        -- Fix: capturar loot ganado por roll (ej. "Mysoul won: |Hitem:...|h...")
+        -- Sin este patrón, items ganados por dados no se registraban en la sesión,
+        -- haciendo que perPlayer.count quedara en 0 y el Wall of Shame reportara
+        -- una ratio deaths/loot incorrecta.
+        { pattern = "^(.+) won: (.+)$",                 isBonusRoll = false },
+        { pattern = "^(.+) ganó: (.+)%.$",              isBonusRoll = false },
     }
     for _, fb in ipairs(fallbacks) do
         patterns[#patterns + 1] = fb
@@ -165,6 +171,31 @@ local function ConsumeRecentRollMetaForPlayer(playerName, itemID)
     return meta
 end
 addonTable.ConsumeRecentRollMetaForPlayer = ConsumeRecentRollMetaForPlayer
+
+-- Peek (no destructivo): devuelve el valor de roll de otro jugador sin borrarlo.
+-- Útil para validar que el item ganó por roll ANTES de consumir el buffer.
+local function PeekRecentRollForPlayer(playerName)
+    if not playerName then return nil end
+    local norm = NormalizeUnitName(playerName)
+    if not norm then return nil end
+    return RecentRolls[norm]
+end
+addonTable.PeekRecentRollForPlayer = PeekRecentRollForPlayer
+
+-- Peek (no destructivo): devuelve los metadatos de roll sin borrarlos.
+-- Valida además la ventana de tiempo ROLL_TRACK_WINDOW.
+local function PeekRecentRollMetaForPlayer(playerName, itemID)
+    if not playerName then return nil end
+    local norm = NormalizeUnitName(playerName)
+    if not norm or not RecentRollMeta[norm] then return nil end
+    local meta = RecentRollMeta[norm]
+    local now  = GetTime and GetTime() or 0
+    if meta.time and (now - meta.time) > ROLL_TRACK_WINDOW then
+        return nil
+    end
+    return meta
+end
+addonTable.PeekRecentRollMetaForPlayer = PeekRecentRollMetaForPlayer
 
 
 -- =============================================================
@@ -467,12 +498,16 @@ local function HandleChatLoot(event, msg, ...)
     addonTable.TriggerLootActivityTimerForItemID(id)
     MarkRecentDrop(id)
 
-    -- Determinar roll del jugador o de otro
+    -- Determinar roll del jugador o de otro jugador.
+    -- ANTES: se consumía el buffer inmediatamente, lo que podía perder el roll
+    -- si el orden de eventos CHAT_MSG_SYSTEM (dado) / CHAT_MSG_LOOT (won) se
+    -- cruzaba con otro mensaje del mismo jugador. Ahora hacemos Peek primero
+    -- y solo Consumimos después de validar que el item se va a registrar.
     local playerRollValue = isMine and GetRecentPlayerRollForItem(id) or nil
     local otherRollMeta   = nil
     if not isMine and playerName then
-        playerRollValue = ConsumeRecentRollForPlayer(playerName)
-        otherRollMeta   = ConsumeRecentRollMetaForPlayer(playerName, id)
+        playerRollValue = PeekRecentRollForPlayer(playerName)
+        otherRollMeta   = PeekRecentRollMetaForPlayer(playerName, id)
         if playerRollValue == nil and otherRollMeta and otherRollMeta.roll then
             playerRollValue = tonumber(otherRollMeta.roll)
         end
@@ -491,8 +526,15 @@ local function HandleChatLoot(event, msg, ...)
     local skipSessionLog = tradeActive and isMine
     if not skipSessionLog then
         local rollTypeForSession = nil
-        if not isMine and otherRollMeta and otherRollMeta.choice then
+        if not isMine and otherRollMeta then
+            -- Puede que la meta ya tenga choice (Need/Greed) o que solo tenga isWin
+            -- (cuando el mensaje "X won:" llegó antes que "X has selected Need for:").
+            -- En ese caso, inferimos que ganó por Need por defecto si no hay choice
+            -- registrada, ya que el item realmente fue adjudicado.
             rollTypeForSession = otherRollMeta.choice
+            if (not rollTypeForSession or rollTypeForSession == "pass") and otherRollMeta.isWin then
+                rollTypeForSession = "need"
+            end
         elseif isMine then
             if lastPlayerRollChoice and lastPlayerRollChoice ~= "pass" then
                 rollTypeForSession = lastPlayerRollChoice
@@ -510,6 +552,12 @@ local function HandleChatLoot(event, msg, ...)
             lootViaBonusRoll, rollTypeForSession,
             itemIsBOE
         )
+        -- Ahora que el item se registró exitosamente, consumir el buffer del otro jugador
+        -- para evitar que se reasocie a un loot posterior.
+        if not isMine and playerName then
+            ConsumeRecentRollForPlayer(playerName)
+            ConsumeRecentRollMetaForPlayer(playerName, id)
+        end
     end
 
     -- Detección de BoE en raid (independiente de la wishlist)
