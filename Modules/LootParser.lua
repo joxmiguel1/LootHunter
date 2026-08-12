@@ -10,7 +10,6 @@ local L               = addonTable.L
 local LogDebug        = addonTable.LogDebug        or function() end
 local FormatLogPrefix = addonTable.FormatLogPrefix or function(t) return "[" .. t .. "]" end
 local NormalizeUnitName    = addonTable.NormalizeUnitName
-local NormalizeName        = addonTable.NormalizeName
 local IsAuthorizedAnnounce = addonTable.IsAuthorizedAnnounce
 
 -- =============================================================
@@ -31,6 +30,8 @@ local function BuildSelfLootPatterns()
         { key = "LOOT_ITEM_SELF",         isBonusRoll = false },
         { key = "LOOT_ITEM_SELF_MULTIPLE", isBonusRoll = false },
         { key = "LOOT_ITEM_BONUS_ROLL",    isBonusRoll = true  },
+        -- "You receive item: %s" — loot propio empujado a la bolsa
+        { key = "LOOT_ITEM_PUSHED_SELF",   isBonusRoll = false },
     }
     for _, entry in ipairs(selfFormats) do
         local fmt = _G[entry.key]
@@ -59,7 +60,8 @@ end
 local function BuildOtherLootPatterns()
     local patterns = {}
     local otherFormats = {
-        { key = "LOOT_ITEM_PUSHED_SELF",    isBonusRoll = false },
+        -- "%s receives item: %s" — loot de OTRO jugador empujado a su bolsa
+        { key = "LOOT_ITEM_PUSHED",          isBonusRoll = false },
         { key = "LOOT_ITEM_MULTIPLE",        isBonusRoll = false },
     }
     for _, entry in ipairs(otherFormats) do
@@ -118,7 +120,6 @@ end
 -- Patrones construidos en tiempo de carga (GlobalStrings ya disponibles)
 local selfLootPatterns    = BuildSelfLootPatterns()
 local otherLootPatterns   = BuildOtherLootPatterns()
-local createdLootPatterns = {}
 local bonusRollMarkers    = BuildBonusRollMarkers()
 addonTable.SystemRollChoicePatterns = BuildSystemRollChoicePatterns()
 
@@ -249,7 +250,7 @@ local globalChatFilterActive = false
 
 -- Filtro aplicado a CHAT_MSG_CHANNEL.
 -- CHAT_MSG_CHANNEL solo recibe canales numerados públicos (General, Comercio,
--- Defensa, LFG, etc.) â€” nunca raid, party, guild ni officer.
+-- Defensa, LFG, etc.) -- nunca raid, party, guild ni officer.
 -- Si el filtro está activo simplemente bloqueamos el mensaje.
 local function GlobalChatFilter(self, event, msg, sender, language,
                                  channelString, target, flags, zoneID,
@@ -320,7 +321,8 @@ local function HandleInstanceChange(event)
     local canStartNewSession = (event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA")
     if inRaidInstance or inRaid then
         StatsStore:EnsureCurrentSession(canStartNewSession)
-    else
+    elseif StatsStore.EndCurrentSession then
+        StatsStore:EndCurrentSession()
     end
     UpdateRaidChatFilter()
 end
@@ -359,13 +361,11 @@ local function HandleChatSystem(event, msg, ...)
                     if lastAnnouncedRollItemID and lastAnnouncedRollTime
                        and (now - lastAnnouncedRollTime) <= ROLL_TRACK_WINDOW then
                         lastPlayerRollItemID = lastAnnouncedRollItemID
-                    else
-                        lastPlayerRollItemID = nil
+                        lastPlayerRollValue  = rollVal
+                        lastPlayerRollTime   = now
+                        LogDebug(string.format("%s Roll del jugador detectado: valor=%s item=%s",
+                            FormatLogPrefix("Roll"), tostring(rollVal), tostring(lastPlayerRollItemID)))
                     end
-                    lastPlayerRollValue = rollVal
-                    lastPlayerRollTime  = now
-                    LogDebug(string.format("%s Roll del jugador detectado: valor=%s item=%s",
-                        FormatLogPrefix("Roll"), tostring(rollVal), tostring(lastPlayerRollItemID)))
                 end
             end
             return
@@ -428,13 +428,6 @@ local function HandleChatLoot(event, msg, ...)
         end
     end
 
-    -- Ignorar mensajes de loot ya procesados por el addon
-    if createdLootPatterns then
-        for _, pattern in ipairs(createdLootPatterns) do
-            if msg:match(pattern) then return end
-        end
-    end
-
     -- Detectar si el propio jugador obtuvo el item
     local itemLink, playerName
     local isMine        = false
@@ -466,7 +459,13 @@ local function HandleChatLoot(event, msg, ...)
             end
         end
     end
-    if not itemLink then return end
+    if not itemLink then
+        LogDebug(string.format("%s Loot no procesado (sin match): jugadorSugerido=%s msg=%s",
+            FormatLogPrefix("Loot"),
+            tostring(otherPlayerName or "nil"),
+            tostring(msg)))
+        return
+    end
 
     local id = tonumber(string.match(itemLink, "item:(%d+):"))
     if not id then return end
@@ -498,11 +497,6 @@ local function HandleChatLoot(event, msg, ...)
     addonTable.TriggerLootActivityTimerForItemID(id)
     MarkRecentDrop(id)
 
-    -- Determinar roll del jugador o de otro jugador.
-    -- ANTES: se consumía el buffer inmediatamente, lo que podía perder el roll
-    -- si el orden de eventos CHAT_MSG_SYSTEM (dado) / CHAT_MSG_LOOT (won) se
-    -- cruzaba con otro mensaje del mismo jugador. Ahora hacemos Peek primero
-    -- y solo Consumimos después de validar que el item se va a registrar.
     local playerRollValue = isMine and GetRecentPlayerRollForItem(id) or nil
     local otherRollMeta   = nil
     if not isMine and playerName then
@@ -527,10 +521,6 @@ local function HandleChatLoot(event, msg, ...)
     if not skipSessionLog then
         local rollTypeForSession = nil
         if not isMine and otherRollMeta then
-            -- Puede que la meta ya tenga choice (Need/Greed) o que solo tenga isWin
-            -- (cuando el mensaje "X won:" llegó antes que "X has selected Need for:").
-            -- En ese caso, inferimos que ganó por Need por defecto si no hay choice
-            -- registrada, ya que el item realmente fue adjudicado.
             rollTypeForSession = otherRollMeta.choice
             if (not rollTypeForSession or rollTypeForSession == "pass") and otherRollMeta.isWin then
                 rollTypeForSession = "need"
@@ -819,7 +809,7 @@ local function HandleChatLinkAnnounce(event, msg, sender, ...)
     if msg:find("Gargul", 1, true) then
         local afterPrefix = msg:match("Gargul%s*:%s*(.+)") or ""
         local textOnly = afterPrefix:gsub("|Hitem:[^|]+|h.-|h", ""):gsub("|c%x+", ""):gsub("|r", ""):gsub("%s+", "")
-        if textOnly ~= "" then return end   -- tiene texto â†’ no es anuncio de drop â†’ ignorar
+        if textOnly ~= "" then return end   -- tiene texto, no es anuncio de drop; ignorar
     end
     for link in msg:gmatch("|Hitem:[-%d:]+|h.-|h") do
         local itemID = tonumber(link:match("item:(%d+):"))
