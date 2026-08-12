@@ -478,6 +478,14 @@ local function HandleChatLoot(event, msg, ...)
         end
     end
 
+    -- Determinar si el item es Bind-on-Equip (bindType == 2) para marcarlo en sesión
+    local bindType = select(14, GetItemInfo(id))
+    local itemIsBOE = (bindType == 2) and true or false
+    if not bindType and C_Item and C_Item.RequestLoadItemDataByID then
+        -- Datos aún no cacheados: solicitarlos para detecciones posteriores
+        C_Item.RequestLoadItemDataByID(id)
+    end
+
     -- Registrar ingreso en la sesión actual
     local tradeActive   = addonTable.tradeActive or false
     local skipSessionLog = tradeActive and isMine
@@ -499,7 +507,8 @@ local function HandleChatLoot(event, msg, ...)
             id, itemLink,
             playerName or (isMine and UnitName("player")) or playerName,
             nil, playerRollValue, playerRollValue ~= nil, nil,
-            lootViaBonusRoll, rollTypeForSession
+            lootViaBonusRoll, rollTypeForSession,
+            itemIsBOE
         )
     end
 
@@ -659,6 +668,9 @@ addonTable.HandleChatLoot = HandleChatLoot
 
 -- =============================================================
 -- FireBoEAlert: notifica BoE detectado en raid (alerta + sesión)
+-- Nota: el item ya queda registrado en sesión con isBOE=true desde el parser
+-- (HandleChatLoot), por lo que aquí solo emitimos alerta visual/sonido y
+-- dejamos el histórico de "boe_detected" sin duplicar la entrada de loot.
 -- =============================================================
 function addonTable.FireBoEAlert(itemID, itemLink, isMine, looterName)
     if not itemID then return end
@@ -703,15 +715,6 @@ function addonTable.FireBoEAlert(itemID, itemLink, isMine, looterName)
             hexColor = string.format("ff%02x%02x%02x", qr * 255, qg * 255, qb * 255)
         end
         resolvedLink = "|c" .. hexColor .. "|Hitem:" .. tostring(itemID) .. "::::::::80:::::|h[" .. itemName .. "]|h|r"
-    end
-
-    -- Registrar en la sesión activa para la pestaña Stats
-    if addonTable.StatsStore and addonTable.StatsStore.AddSessionLootEntry then
-        addonTable.StatsStore:AddSessionLootEntry(
-            itemID, resolvedLink, looter,
-            nil, nil, false,
-            L["BOE_TRASH_SOURCE"] or "Trash Mob",
-            false, nil, true)
     end
 
     -- Registrar en historial global
