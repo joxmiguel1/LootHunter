@@ -1,5 +1,8 @@
 All notable changes to this project will be documented in this file.
 
+## v1.2.7 Jerryments part 2
+- Wall of Shame: fixed loot not being registered when a player won an item via Need/Greed roll.
+
 ## v1.2.6 Jerryments
 
 - Wall of Shame: replaced the channel-selection popup with a resizable copy-friendly window. (thanks for the suggestion Jerryments!)
