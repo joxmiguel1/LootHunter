@@ -1,0 +1,4 @@
+# Git ignore rules for LootHunter
+
+.github/
+.copilot/
