@@ -377,6 +377,18 @@ addonTable.HandleChatSystem = HandleChatSystem
 -- =============================================================
 -- MANEJADOR DE CHAT LOOT (CHAT_MSG_LOOT)
 -- =============================================================
+
+local function CleanLootPlayerName(name)
+    if not name or name == "" then return name end
+    name = name:gsub("^%s+", ""):gsub("%s+$", "")
+    name = name:gsub("^[Ll][Oo][Oo][Tt]%s*[:%-]%s*", "")
+    name = name:gsub("^[Ll][Oo][Oo][Tt]%s+", "")
+    name = name:gsub("^[Bb]otín%s*[:%-]%s*", "")
+    name = name:gsub("^[Bb]otín%s+", "")
+    name = name:gsub("^%s+", ""):gsub("%s+$", "")
+    return name
+end
+
 local function HandleChatLoot(event, msg, ...)
     local CurrentCharDB = addonTable.CurrentCharDB
     if not CurrentCharDB or type(msg) ~= "string" then return end
@@ -408,7 +420,7 @@ local function HandleChatLoot(event, msg, ...)
         otherPlayerName   = msg:match("^(.+) has selected " .. passStr .. " for:") or msg:match("^(.+) has selected Pass for:")
         otherPlayerChoice = "pass"
     elseif msg:find(" won:", 1, true) then
-        otherPlayerName = msg:match("^(.+) won:")
+        otherPlayerName = CleanLootPlayerName(msg:match("^(.+) won:"))
         if otherPlayerName then
             local norm = NormalizeUnitName(otherPlayerName)
             if norm then
@@ -420,6 +432,7 @@ local function HandleChatLoot(event, msg, ...)
 
     -- Guardar elección de otros jugadores en RecentRollMeta
     if otherPlayerName and otherPlayerChoice then
+        otherPlayerName = CleanLootPlayerName(otherPlayerName)
         local norm = NormalizeUnitName(otherPlayerName)
         if norm then
             RecentRollMeta[norm] = RecentRollMeta[norm] or {}
@@ -451,7 +464,7 @@ local function HandleChatLoot(event, msg, ...)
                 if capPlayer:find("|Hitem:") and not capLink:find("|Hitem:") then
                     capPlayer, capLink = capLink, capPlayer
                 end
-                playerName       = capPlayer
+                playerName       = CleanLootPlayerName(capPlayer)
                 itemLink         = capLink
                 isMine           = (playerName == UnitName("player"))
                 lootViaBonusRoll = pattern.isBonusRoll or false

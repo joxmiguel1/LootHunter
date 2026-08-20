@@ -6,7 +6,7 @@
 local _, addonTable = ...
 
 local NowSeconds      = addonTable.NowSeconds
-local LogDebug        = addonTable.LogDebug      or function() end
+local LogDebug        = addonTable.LogDebug      or function(...) end
 local FormatLogPrefix = addonTable.FormatLogPrefix or function(t) return "[" .. t .. "]" end
 local L               = addonTable.L
 
@@ -460,6 +460,26 @@ function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, ro
         if not isBOE and quality ~= nil and quality <= 1 then return end
     end
 
+    if itemID then
+        local classID = nil
+        if GetItemInfoInstant then
+            classID = select(6, GetItemInfoInstant(itemID))
+        end
+        if not classID and GetItemInfo then
+            classID = select(12, GetItemInfo(itemID))
+        end
+        if classID then
+            local REAGENT_CLASS    = _G.LE_ITEM_CLASS_REAGENT    or 5
+            local TRADEGOODS_CLASS = _G.LE_ITEM_CLASS_TRADEGOODS or 7
+            local GEM_CLASS        = _G.LE_ITEM_CLASS_GEM         or 3
+            if classID == REAGENT_CLASS or classID == TRADEGOODS_CLASS or classID == GEM_CLASS then
+                LogDebug(string.format("%s Loot de sesión ignorado (material de profesión): id=%s class=%s",
+                    FormatLogPrefix("Stats"), tostring(itemID), tostring(classID)))
+                return
+            end
+        end
+    end
+
     local icon    = itemID and select(10, GetItemInfo(itemID)) or nil
     local quality = nil
     if itemID and C_Item and C_Item.GetItemQualityByID then
@@ -471,6 +491,12 @@ function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, ro
     if not quality and link then
         local getQual = addonTable.GetQualityFromLink
         quality = getQual and getQual(link) or nil
+    end
+
+    local bindType   = itemID and select(14, GetItemInfo(itemID)) or nil
+    local entryIsBOE = (isBOE or bindType == 2) and true or false
+    if not entryIsBOE and itemID and bindType == nil and C_Item and C_Item.RequestLoadItemDataByID then
+        C_Item.RequestLoadItemDataByID(itemID)
     end
 
     local now   = (type(time) == "function" and time()) or (GetTime and math.floor(GetTime())) or 0
@@ -487,11 +513,29 @@ function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, ro
         time        = now,
         boss        = boss,
         bonus       = isBonusLoot or false,
-        isBOE       = isBOE or false,
+        isBOE       = entryIsBOE or false,
         destroyed   = false,
     }
     session.items[#session.items + 1] = entry
     session.lastEventAt = now
+
+    if not entryIsBOE and itemID and bindType == nil and C_Timer and C_Timer.After then
+        C_Timer.After(0.8, function()
+            if not GetItemInfo then return end
+            local bt = select(14, GetItemInfo(itemID))
+            if bt == 2 then
+                entry.isBOE = true
+            end
+            if not entry.quality then
+                local q = select(3, GetItemInfo(itemID))
+                if q then entry.quality = q end
+            end
+            if not entry.icon then
+                local ic = select(10, GetItemInfo(itemID))
+                if ic then entry.icon = ic end
+            end
+        end)
+    end
 
     local perPlayer = session.perPlayer
     local playerKey = entry.player or (L and L["STATS_UNKNOWN_PLAYER"]) or "Unknown"
