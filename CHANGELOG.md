@@ -1,7 +1,13 @@
 All notable changes to this project will be documented in this file.
 
+## v1.2.8
+
+- Stats: the session loot list now ignores profession materials (enchanting crystals/shards, gems, reagents and trade goods), so only real boss loot is recorded.
+- Loot list: fixed player names occasionally showing a "LOOT"/"Botín" prefix when loot was won via Need/Greed rolls in a raid.
+- Stats: fixed Bind-on-Equip items (e.g. epic drops) not being marked with the `[BoE]` badge when item data wasn't cached at loot time.
+
 ## v1.2.7 Jerryments part 2
-- Wall of Shame: fixed loot not being registered when a player won an item via Need/Greed roll.
+- Stats: fixed loot not being registered when a player won an item via Need/Greed roll.
 
 ## v1.2.6 Jerryments
 
