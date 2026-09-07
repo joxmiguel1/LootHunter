@@ -60,10 +60,17 @@ addonTable.TrimString = TrimString
 -- o extrayendo la parte antes del guion (elimina realm suffix).
 -- Es la versión extendida de NormalizeUnitName usada para comparar
 -- nombres de líderes/asistentes en mensajes de chat.
+-- Garantiza que nunca retorna string vacío (devuelve nil en su lugar).
 local function NormalizeName(name)
     if not name or name == "" then return nil end
-    if Ambiguate then return Ambiguate(name, "short") end
-    return name:match("^[^-]+") or name
+    local result
+    if Ambiguate then
+        result = Ambiguate(name, "short")
+    else
+        result = name:match("^[^-]+") or name
+    end
+    if not result or result == "" then return nil end
+    return result
 end
 addonTable.NormalizeName = NormalizeName
 

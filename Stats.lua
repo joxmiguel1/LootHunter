@@ -230,21 +230,60 @@ local function GetWallOfShame(session)
     local reviveName, reviveCount = topEntry(revives)
     local deadTimeName, deadTimeSeconds = topEntry(deadTime)
 
-    -- Death-per-Loot Ratio: jugador con peor proporción muertes/items
-    local ratioName, ratioDeaths, ratioItems = nil, 0, 0
+    -- Worst death-per-pull ratio: muertes del jugador divididas por número de pulls en los que participó
+    local ratioName, ratioDeaths, ratioPulls, ratioHasData = nil, 0, 0, false
     local bestRatio = 0
-    local perPlayer = session and session.perPlayer or {}
+    local pulls = session and session.pulls or {}
+    local pullsPerPlayer = (pulls and pulls.perPlayer) or {}
+    local pullsTotal = (pulls and pulls.total) or 0
     for name, dCount in pairs(deaths) do
         local d = dCount or 0
-        if d > 0 then
-            local itemsWon = perPlayer[name] and perPlayer[name].count or 0
-            local ratio = itemsWon > 0 and (d / itemsWon) or d
+        local playerPulls = pullsPerPlayer[name] or pullsTotal or 0
+        if d > 0 and playerPulls > 0 then
+            local ratio = d / playerPulls
             if ratio > bestRatio then
                 bestRatio = ratio
                 ratioName = name
                 ratioDeaths = d
-                ratioItems = itemsWon
+                ratioPulls = playerPulls
+                ratioHasData = true
             end
+        end
+    end
+
+    -- Most kills on allies: jugador que hizo más killing blows a otros miembros del grupo
+    local allyKillsName, allyKillsCount, allyKillsVictims, allyKillsHasData = nil, 0, nil, false
+    local allyKills = session and session.allyKills or {}
+    for killerName, entry in pairs(allyKills) do
+        local total = entry and entry.total or 0
+        if total > allyKillsCount then
+            allyKillsName = killerName
+            allyKillsCount = total
+            allyKillsVictims = entry and entry.victims or {}
+            allyKillsHasData = true
+        end
+    end
+
+    -- Friendly Fire (fuego amigo): jugador que más daño recibió de otros jugadores del grupo
+    local lambName, lambAmount, lambSource, lambHasData = nil, 0, nil, false
+    local ff = session and session.friendlyFire or {}
+    for victimName, entry in pairs(ff) do
+        local total = entry and entry.total or 0
+        if total > lambAmount then
+            lambName = victimName
+            lambAmount = total
+            -- Encontrar la fuente que más le hizo daño
+            local topSource, topSourceAmount = nil, 0
+            if entry.sources then
+                for sName, sAmount in pairs(entry.sources) do
+                    if (sAmount or 0) > topSourceAmount then
+                        topSource = sName
+                        topSourceAmount = sAmount
+                    end
+                end
+            end
+            lambSource = topSource
+            lambHasData = true
         end
     end
 
@@ -254,8 +293,10 @@ local function GetWallOfShame(session)
     return deathName, deathCount,
            reviveName, reviveCount,
            deadTimeName, deadTimeSeconds,
-           ratioName, ratioDeaths, ratioItems,
-           firstBloodName
+           ratioName, ratioDeaths, ratioPulls, ratioHasData,
+           firstBloodName,
+           allyKillsName, allyKillsCount, allyKillsVictims, allyKillsHasData,
+           lambName, lambAmount, lambSource, lambHasData
 end
 
 local function FormatDeadTime(seconds)
@@ -267,6 +308,36 @@ local function FormatDeadTime(seconds)
         return string.format("%dh %dm", hours, remMins)
     end
     return string.format("%dm", remMins)
+end
+
+-- Inserta separadores de miles (ej. 12029 → "12,029")
+local function FormatWithCommas(n)
+    n = math.floor(tonumber(n) or 0)
+    local s = tostring(n)
+    local result = ""
+    while #s > 3 do
+        result = "," .. s:sub(-3) .. result
+        s = s:sub(1, -4)
+    end
+    return s .. result
+end
+
+local function FormatDamage(amount)
+    amount = math.floor(tonumber(amount) or 0)
+    if amount >= 1000000 then
+        local m = amount / 1000000
+        if m >= 10 then
+            return string.format("%.0fM", m)
+        end
+        return string.format("%.1fM", m)
+    end
+    if amount >= 10000 then
+        return FormatWithCommas(math.floor(amount / 1000)) .. "K"
+    end
+    if amount >= 1000 then
+        return string.format("%.1fK", amount / 1000)
+    end
+    return tostring(amount)
 end
 
 local function BuildWallOfShameLines(session)
@@ -286,25 +357,56 @@ local function BuildWallOfShameLines(session)
     local deathName, deathCount,
           reviveName, reviveCount,
           deadTimeName, deadTimeSeconds,
-          ratioName, ratioDeaths, ratioItems,
-          firstBloodName = GetWallOfShame(session)
+          ratioName, ratioDeaths, ratioPulls, ratioHasData,
+          firstBloodName,
+          allyKillsName, allyKillsCount, allyKillsVictims, allyKillsHasData,
+          lambName, lambAmount, lambSource, lambHasData = GetWallOfShame(session)
 
     -- First Blood
     table.insert(lines, string.format(L["STATS_WALL_FIRSTBLOOD"] or "First Blood - %s", firstBloodName or "N/A"))
 
-    -- Death-per-Loot Ratio
-    if ratioName and ratioDeaths > 0 then
-        if ratioItems > 0 then
-            local ratioStr = string.format("%.1f", ratioDeaths / ratioItems)
-            table.insert(lines, string.format(L["STATS_WALL_RATIO"] or "Worst death/loot ratio - %s (%s deaths, %d items = %s/loot)",
-                ratioName, ratioDeaths, ratioItems, ratioStr))
+    -- Worst death-per-pull ratio (sólo si hay datos de pulls; evita duplicar Most deaths)
+    if ratioHasData and ratioName and ratioDeaths > 0 then
+        local ratioStr = string.format("%.2f", ratioDeaths / math.max(1, ratioPulls))
+        table.insert(lines, string.format(L["STATS_WALL_RATIO_PULLS"] or "Worst death/pull ratio - %s (%d deaths in %d pulls = %s/pull)",
+            ratioName, ratioDeaths, ratioPulls, ratioStr))
+    else
+        table.insert(lines, L["STATS_WALL_RATIO_NA"] or "Worst death/pull ratio - N/A")
+    end
+
+    -- Most kills on allies (último golpe killing blow de aliado)
+    if allyKillsHasData and allyKillsName and allyKillsCount > 0 then
+        -- Construir lista de víctimas afectadas (top 3)
+        local victimList = {}
+        if allyKillsVictims then
+            -- Construir pares y ordenar por número descendente
+            local pairs_list = {}
+            for vName, vCount in pairs(allyKillsVictims) do
+                pairs_list[#pairs_list + 1] = { vName, vCount }
+            end
+            table.sort(pairs_list, function(a, b) return a[2] > b[2] end)
+            for i = 1, math.min(3, #pairs_list) do
+                victimList[#victimList + 1] = pairs_list[i][1]
+            end
+        end
+        if #victimList > 0 then
+            table.insert(lines, string.format(L["STATS_WALL_ALLYKILLS"] or "Most kills on allies - %s (%d on %s)",
+                allyKillsName, allyKillsCount, table.concat(victimList, ", ")))
         else
-            table.insert(lines, string.format(L["STATS_WALL_RATIO_ZERO"] or "Worst death/loot ratio - %s (%s deaths, 0 items)",
-                ratioName, ratioDeaths))
+            table.insert(lines, string.format(L["STATS_WALL_ALLYKILLS_SIMPLE"] or "Most kills on allies - %s (%d)",
+                allyKillsName, allyKillsCount))
         end
     end
 
-    table.insert(lines, string.format(L["STATS_WALL_DEATHS"] or "Most time death - %s (%s)", deathName or "N/A", deathCount or 0))
+    -- Friendly Fire (jugador que más daño recibió de miembros del grupo)
+    if lambHasData and lambName and lambAmount > 0 then
+        local src = lambSource or "N/A"
+        table.insert(lines, string.format(L["STATS_WALL_LAMB"] or "Friendly Fire - %s (%s from %s)",
+            lambName, FormatDamage(lambAmount), src))
+    end
+
+    -- Si el "Most deaths" coincide con el ratio, mantenerlo; aporta contexto de volumen total
+    table.insert(lines, string.format(L["STATS_WALL_DEATHS"] or "Most deaths - %s (%s)", deathName or "N/A", deathCount or 0))
     table.insert(lines, string.format(L["STATS_WALL_REVIVES"] or "More times revived - %s (%s)", reviveName or "N/A", reviveCount or 0))
     table.insert(lines, string.format(L["STATS_WALL_DEADTIME"] or "Most time dead - %s (%s)", deadTimeName or "N/A", FormatDeadTime(deadTimeSeconds)))
     return lines

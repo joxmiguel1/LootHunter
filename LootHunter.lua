@@ -384,20 +384,27 @@ local function HandleLootEvent(event)
     end
 end
 
--- Manejador de BOSS_KILL: dispara el recordatorio de moneda
+-- Manejador de BOSS_KILL: dispara el recordatorio de moneda y registra el pull
 local function HandleBossKill(event, encounterID, bossName, ...)
     if not bossName or bossName == "" then return end
     if addonTable.ScheduleCoinReminder then
         addonTable.ScheduleCoinReminder(encounterID, bossName)
     end
+    if addonTable.StatsStore and addonTable.StatsStore.RecordPull then
+        addonTable.StatsStore:RecordPull()
+    end
 end
 
--- Manejador de ENCOUNTER_END: fallback si BOSS_KILL no disparó
+-- Manejador de ENCOUNTER_END: kill (success==1) registra pull; wipe (success==0) sólo dispara recordatorio de moneda
 local function HandleEncounterEnd(event, encounterID, bossName, _, success, ...)
-    if tonumber(success) ~= 1 then return end
     if not bossName or bossName == "" then return end
     if addonTable.ScheduleCoinReminder then
         addonTable.ScheduleCoinReminder(encounterID, bossName)
+    end
+    if tonumber(success) == 1 then
+        if addonTable.StatsStore and addonTable.StatsStore.RecordPull then
+            addonTable.StatsStore:RecordPull()
+        end
     end
 end
 

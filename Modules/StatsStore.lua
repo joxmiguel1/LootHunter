@@ -205,10 +205,13 @@ function StatsStore:StartSession(raidName, difficultyName, instanceID)
         lastEventAt  = startedAt,
         items        = {},
         perPlayer    = {},
+        pulls        = {},
         deaths       = {},
         revives      = {},
         deadTime     = {},
         deathStart   = {},
+        deathStreak  = {},
+        bestStreak   = {},
         firstDeath   = nil,
         label        = self:BuildSessionLabel(raidName, idx, startedAt),
     }
@@ -249,8 +252,9 @@ function StatsStore:EnsureCurrentSession(allowStart)
                 sess.deaths    = sess.deaths    or {}
                 sess.revives   = sess.revives   or {}
                 sess.deadTime  = sess.deadTime  or {}
-                sess.deathStart = sess.deathStart or {}
-                return self.currentSessionKey, sess
+                sess.deathStart = sess.deathStart or {}                sess.pulls        = sess.pulls        or {}
+                sess.deathStreak  = sess.deathStreak  or {}
+                sess.bestStreak   = sess.bestStreak   or {}                return self.currentSessionKey, sess
             end
         end
         return nil
@@ -283,6 +287,9 @@ function StatsStore:EnsureCurrentSession(allowStart)
                 sess.revives    = sess.revives    or {}
                 sess.deadTime   = sess.deadTime   or {}
                 sess.deathStart = sess.deathStart or {}
+                sess.pulls        = sess.pulls        or {}
+                sess.deathStreak  = sess.deathStreak  or {}
+                sess.bestStreak   = sess.bestStreak   or {}
                 return self.currentSessionKey, sess
             end
         end
@@ -296,6 +303,9 @@ function StatsStore:EnsureCurrentSession(allowStart)
             sess.revives   = sess.revives   or {}
             sess.deadTime  = sess.deadTime  or {}
             sess.deathStart = sess.deathStart or {}
+            sess.pulls        = sess.pulls        or {}
+            sess.deathStreak  = sess.deathStreak  or {}
+            sess.bestStreak   = sess.bestStreak   or {}
             return self.currentSessionKey, sess
         end
     end
@@ -314,6 +324,9 @@ function StatsStore:EnsureCurrentSession(allowStart)
             recent.revives    = recent.revives    or {}
             recent.deadTime   = recent.deadTime   or {}
             recent.deathStart = recent.deathStart or {}
+            recent.pulls        = recent.pulls        or {}
+            recent.deathStreak  = recent.deathStreak  or {}
+            recent.bestStreak   = recent.bestStreak   or {}
             return recent.key, recent
         end
     end
@@ -397,21 +410,130 @@ function StatsStore:AddDeath(name)
         if db and db.sessions then session = db.sessions[self.currentSessionKey] end
     end
     if not session then return end
-    name = name or (L and L["STATS_UNKNOWN_PLAYER"]) or "Unknown"
+    -- Si el nombre llegó vacío o sólo espacios, usar "Unknown" como fallback para no perder el conteo
+    if not name or type(name) ~= "string" or name:match("^%s*$") then
+        name = (L and L["STATS_UNKNOWN_PLAYER"]) or "Unknown"
+    else
+        name = name:match("^%s*(.-)%s*$")  -- trim
+    end
     session.deaths     = session.deaths     or {}
     session.deathStart = session.deathStart or {}
+    session.deathStreak = session.deathStreak or {}
+    session.bestStreak  = session.bestStreak  or {}
     session.deaths[name] = (session.deaths[name] or 0) + 1
     if not session.deathStart[name] then
         session.deathStart[name] = NowSeconds()
     end
+    -- Si el jugador no estaba marcado como vivo en este pull, es el primer death del nuevo pull:
+    -- romper la racha anterior antes de incrementar.
+    if session.deathStreak[name] == nil then
+        -- Murió en un pull nuevo: la racha previa se consolidó como bestStreak si era mejor
+        session.bestStreak[name] = math.max(session.bestStreak[name] or 0, session.deathStreak[name] or 0)
+        session.deathStreak[name] = 1
+    else
+        session.deathStreak[name] = session.deathStreak[name] + 1
+    end
+    -- Actualizar mejor racha en vivo también
+    session.bestStreak[name] = math.max(session.bestStreak[name] or 0, session.deathStreak[name] or 0)
+    session.lastEventAt = NowSeconds()
     if not session.firstDeath then
         session.firstDeath = { name = name, time = NowSeconds() }
     end
 end
 
+-- Registra el cierre de un pull (BOSS_KILL / wipe): incrementa contador y reinicia streaks
+function StatsStore:RecordPull()
+    local _, session = self:EnsureCurrentSession(false)
+    if not session and self.currentSessionKey then
+        local db = self:EnsureSessionDB()
+        if db and db.sessions then session = db.sessions[self.currentSessionKey] end
+    end
+    if not session then return end
+    session.pulls = session.pulls or {}
+    session.pulls.total = (session.pulls.total or 0) + 1
+    -- Consolidar cualquier racha activa como best y resetear streaks al pasar de pull
+    session.deathStreak = session.deathStreak or {}
+    session.bestStreak  = session.bestStreak  or {}
+    for playerName, current in pairs(session.deathStreak) do
+        session.bestStreak[playerName] = math.max(session.bestStreak[playerName] or 0, current or 0)
+    end
+    -- A nadie se le considera "vivo en este pull" todavía: usar sentinel nil
+    wipe(session.deathStreak)
+    session.lastEventAt = NowSeconds()
+end
+
+-- Registra daño hecho por un jugador del grupo a otro miembro del grupo (friendly fire)
+-- Se acumula por jugador víctima: { victimName = { total = N, sources = { [sourceName] = N } } }
+function StatsStore:RecordFriendlyFire(victimName, sourceName, amount)
+    if not victimName or victimName == "" or not sourceName or sourceName == "" then return end
+    if victimName == sourceName then return end
+    local delta = tonumber(amount) or 0
+    if delta <= 0 then return end
+    local _, session = self:EnsureCurrentSession(false)
+    if not session and self.currentSessionKey then
+        local db = self:EnsureSessionDB()
+        if db and db.sessions then session = db.sessions[self.currentSessionKey] end
+    end
+    if not session then return end
+    session.friendlyFire = session.friendlyFire or {}
+    local entry = session.friendlyFire[victimName] or { total = 0, sources = {} }
+    entry.total = (entry.total or 0) + delta
+    entry.sources[sourceName] = (entry.sources[sourceName] or 0) + delta
+    session.friendlyFire[victimName] = entry
+    session.lastEventAt = NowSeconds()
+end
+
+-- Registra un último golpe de un aliado sobre otro aliado (killing blow de friendly fire)
+-- session.allyKills = { [killer] = { total = N, victims = { [victim] = N } } }
+function StatsStore:RecordAllyKill(killerName, victimName)
+    if not killerName or killerName == "" or not victimName or victimName == "" then return end
+    if killerName == victimName then return end
+    local _, session = self:EnsureCurrentSession(false)
+    if not session and self.currentSessionKey then
+        local db = self:EnsureSessionDB()
+        if db and db.sessions then session = db.sessions[self.currentSessionKey] end
+    end
+    if not session then return end
+    session.allyKills = session.allyKills or {}
+    local entry = session.allyKills[killerName] or { total = 0, victims = {} }
+    entry.total = (entry.total or 0) + 1
+    entry.victims[victimName] = (entry.victims[victimName] or 0) + 1
+    session.allyKills[killerName] = entry
+    session.lastEventAt = NowSeconds()
+end
+
+-- Marca al jugador como presente en el pull actual (incrementa su contador de pulls y resetea su streak)
+function StatsStore:AddPlayerToPull(name)
+    local _, session = self:EnsureCurrentSession(false)
+    if not session and self.currentSessionKey then
+        local db = self:EnsureSessionDB()
+        if db and db.sessions then session = db.sessions[self.currentSessionKey] end
+    end
+    if not session then return end
+    if not name or type(name) ~= "string" or name:match("^%s*$") then
+        name = (L and L["STATS_UNKNOWN_PLAYER"]) or "Unknown"
+    else
+        name = name:match("^%s*(.-)%s*$")
+    end
+    session.pulls = session.pulls or {}
+    session.pulls.perPlayer = session.pulls.perPlayer or {}
+    session.pulls.perPlayer[name] = (session.pulls.perPlayer[name] or 0) + 1
+    -- Si el jugador entra a un pull nuevo después de haber muerto, consolidar y resetear
+    session.deathStreak = session.deathStreak or {}
+    session.bestStreak  = session.bestStreak  or {}
+    if session.deathStreak[name] ~= nil then
+        session.bestStreak[name] = math.max(session.bestStreak[name] or 0, session.deathStreak[name] or 0)
+        session.deathStreak[name] = nil
+    end
+end
+
 -- Registra la resurrección de un jugador y finaliza su temporizador de muerte
 function StatsStore:AddRevive(name)
-    name = name or (L and L["STATS_UNKNOWN_PLAYER"]) or "Unknown"
+    if not name or type(name) ~= "string" or name:match("^%s*$") then
+        name = (L and L["STATS_UNKNOWN_PLAYER"]) or "Unknown"
+    else
+        name = name:match("^%s*(.-)%s*$")
+    end
     local _, session = self:EnsureCurrentSession(false)
     if not session and self.currentSessionKey then
         local db = self:EnsureSessionDB()
