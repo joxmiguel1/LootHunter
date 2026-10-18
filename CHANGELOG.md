@@ -1,14 +1,16 @@
 All notable changes to this project will be documented in this file.
 
-## v1.2.9
+## v1.2.10
+- Stats: fixed session drops being listed twice (each drop is announced by the client in two chat lines)
 
+## v1.2.9
 - Stats: fixed death counter registering pet/guardian/totem deaths as player deaths in CombatLog.
 - Stats: fixed the player name occasionally showing a "LOOT"/"Botín" prefix when winning items via Need/Greed rolls in a raid.
 - Stats: fixed Bind-on-Equip items not being marked with the `[BoE]` badge when item data wasn't cached at loot time.
 - Stats: session loot list now ignores profession materials (enchanting crystals/shards, gems, reagents and trade goods).
 - Wall of Shame: changed ratio metric from deaths/loot to deaths/pulls (auto-tracked per boss kill) so the stat no longer duplicates "Most deaths" when 0 items are won.
-- Wall of Shame: replaced "Most wipes" with "Most kills on allies" — the player that landed the most killing blows on other group members (auto-tracked via damage+death proximity), including the top victims.
-- Wall of Shame: added "Friendly Fire" stat — the player that received the most damage from group members, showing the top source (e.g. `Friendly Fire - Mysoul (12.0M from Hyacinthuz)`).
+- Wall of Shame: replaced "Most wipes" with "Most kills on allies" the player that landed the most killing blows on other group members (auto-tracked via damage+death proximity), including the top victims.
+- Wall of Shame: added "Friendly Fire" stat the player that received the most damage from group members, showing the top source (e.g. `Friendly Fire - Mysoul (12.0M from Hyacinthuz)`).
 
 
 ## v1.2.8

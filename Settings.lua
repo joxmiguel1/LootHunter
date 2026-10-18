@@ -782,6 +782,9 @@ function addonTable.BuildSettingsPanelInto(parentFrame)
                         end
                         if StatsStore and StatsStore.MAX_SESSION_LOGS then
                             StatsStore.MAX_SESSION_LOGS = rounded
+                            if StatsStore.TrimSessions then
+                                StatsStore:TrimSessions()
+                            end
                         end
                     end
                 end

@@ -163,6 +163,83 @@ function StatsStore:EnsureSessionDB()
     return db
 end
 
+-- Elimina las sesiones más antiguas que superan MAX_SESSION_LOGS
+function StatsStore:TrimSessions()
+    local db = self:EnsureSessionDB()
+    if not db or not db.sessions then return end
+    local keys = {}
+    for k in pairs(db.sessions) do keys[#keys + 1] = k end
+    local limit = math.max(1, tonumber(self.MAX_SESSION_LOGS) or 25)
+    if #keys <= limit then return end
+    table.sort(keys, function(a, b)
+        local sa = db.sessions[a] and db.sessions[a].startedAt or 0
+        local sb = db.sessions[b] and db.sessions[b].startedAt or 0
+        return sa > sb
+    end)
+    for i = limit + 1, #keys do
+        db.sessions[keys[i]] = nil
+    end
+end
+
+-- Normaliza el nombre de jugador guardado en sesiones antiguas: quita el enlace
+-- de historial de loot y resuelve el "You" del propio jugador.
+local function CleanStoredLootPlayerName(name, charKey)
+    if type(name) ~= "string" or name == "" then return name end
+    local cleaned = name:gsub("^|H.-|h%[.-%]|h:%s*", "")
+    cleaned = cleaned:gsub("^%s+", ""):gsub("%s+$", "")
+    if cleaned == "You" or cleaned == "Tú" or (_G.YOU and cleaned == _G.YOU) then
+        cleaned = charKey and charKey:match("^(.-)%s+%-") or cleaned
+    end
+    return cleaned
+end
+
+-- Repara sesiones ya guardadas: el cliente emite dos líneas de chat por cada
+-- botín, por lo que el mismo item quedó registrado dos veces. Se conserva una
+-- sola entrada por item/jugador y se fusionan los datos que traía la duplicada.
+function StatsStore:RepairDuplicateSessionLoot()
+    if not LootHunterDB or not LootHunterDB.Sessions then return end
+    local window = 10
+    for charKey, db in pairs(LootHunterDB.Sessions) do
+        for _, session in pairs(db.sessions or {}) do
+            local items = session.items
+            if type(items) == "table" and #items > 1 then
+                local kept, lastIndex, perPlayer = {}, {}, {}
+                for _, entry in ipairs(items) do
+                    entry.player = CleanStoredLootPlayerName(entry.player, charKey)
+                    if type(entry.link) == "string" then
+                        entry.link = entry.link:gsub("[%s%.,;:]+$", "")
+                    end
+                    local key  = entry.itemID and (tostring(entry.itemID) .. "|" .. tostring(entry.player)) or nil
+                    local prev = key and lastIndex[key] and kept[lastIndex[key]] or nil
+                    if prev and entry.time and prev.time
+                        and math.abs(entry.time - prev.time) <= window then
+                        prev.class    = prev.class    or entry.class
+                        prev.quality  = prev.quality  or entry.quality
+                        prev.icon     = prev.icon     or entry.icon
+                        prev.roll     = prev.roll     or entry.roll
+                        prev.rollType = prev.rollType or entry.rollType
+                        prev.bonus    = prev.bonus or entry.bonus
+                        prev.isBOE    = prev.isBOE or entry.isBOE
+                    else
+                        kept[#kept + 1] = entry
+                        if key then lastIndex[key] = #kept end
+                    end
+                end
+                session.items = kept
+                for _, entry in ipairs(kept) do
+                    local playerKey = entry.player or (L and L["STATS_UNKNOWN_PLAYER"]) or "Unknown"
+                    perPlayer[playerKey] = perPlayer[playerKey] or { count = 0, class = entry.class }
+                    perPlayer[playerKey].count = perPlayer[playerKey].count + 1
+                    if entry.class and not perPlayer[playerKey].class then
+                        perPlayer[playerKey].class = entry.class
+                    end
+                end
+                session.perPlayer = perPlayer
+            end
+        end
+    end
+end
+
 -- Construye la etiqueta visible para una sesión (ej. "Mogu'shan Vaults #2 - 02/22/2026")
 function StatsStore:BuildSessionLabel(raidName, sessionIndex, startedAt)
     local dateStr = (type(date) == "function" and date("%m/%d/%Y", startedAt or time())) or tostring(startedAt or "")
@@ -670,20 +747,7 @@ function StatsStore:AddSessionLootEntry(itemID, link, playerName, classToken, ro
     end
 
     -- Purgar sesiones antiguas al agregar loot; mantener solo las más recientes
-    local db = self:EnsureSessionDB()
-    if db then
-        local keys = {}
-        for k in pairs(db.sessions) do keys[#keys + 1] = k end
-        table.sort(keys, function(a, b)
-            local sa = db.sessions[a] and db.sessions[a].startedAt or 0
-            local sb = db.sessions[b] and db.sessions[b].startedAt or 0
-            return sa > sb
-        end)
-        local limit = math.max(1, tonumber(self.MAX_SESSION_LOGS) or 20)
-        for i = limit + 1, #keys do
-            db.sessions[keys[i]] = nil
-        end
-    end
+    self:TrimSessions()
 end
 
 -- =============================================================
@@ -706,6 +770,12 @@ function StatsStore:GetSessionList()
         }
     end
     table.sort(items, function(a, b) return (a.startedAt or 0) > (b.startedAt or 0) end)
+    local limit = math.max(1, tonumber(self.MAX_SESSION_LOGS) or 25)
+    if #items > limit then
+        local trimmed = {}
+        for i = 1, limit do trimmed[i] = items[i] end
+        items = trimmed
+    end
     return items
 end
 

@@ -317,6 +317,12 @@ local function HandleAddonLoaded(event, arg1)
     if StatsStore then
         StatsStore:EnsureHistoryDB()
         StatsStore:EnsureSessionDB()
+        if StatsStore.TrimSessions then
+            StatsStore:TrimSessions()
+        end
+        if StatsStore.RepairDuplicateSessionLoot then
+            StatsStore:RepairDuplicateSessionLoot()
+        end
     end
     if addonTable.MigrateSpecIDs then addonTable.MigrateSpecIDs() end
 

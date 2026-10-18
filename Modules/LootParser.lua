@@ -130,6 +130,27 @@ addonTable.SystemRollChoicePatterns = BuildSystemRollChoicePatterns()
 -- Ventana de tiempo (segundos) para asociar un roll con un item anunciado
 local ROLL_TRACK_WINDOW = 30
 
+-- Ventana para descartar la línea de chat repetida que el cliente emite junto a
+-- cada botín ("|HlootHistory:1|h[Loot]|h: X receives loot: [Item]" y "X receives loot: [Item].")
+local LOOT_DEDUPE_WINDOW = 10
+
+-- Últimos loots procesados: [itemID:jugador[:bonus]] = GetTime()
+local RecentLootSeen = {}
+
+-- Devuelve true si el mismo objeto/jugador ya se procesó hace muy poco
+local function IsDuplicateLootMessage(itemID, playerName, isBonusLoot)
+    if not itemID then return false end
+    local now = GetTime and GetTime() or 0
+    local key = string.format("%s:%s:%s", tostring(itemID),
+        tostring(NormalizeUnitName(playerName or "")), isBonusLoot and "B" or "N")
+    for k, seenAt in pairs(RecentLootSeen) do
+        if (now - seenAt) > LOOT_DEDUPE_WINDOW then RecentLootSeen[k] = nil end
+    end
+    local last = RecentLootSeen[key]
+    RecentLootSeen[key] = now
+    return last ~= nil
+end
+
 -- Tablas de rolls recientes: { [playerNameNorm] = rollValue }
 local RecentRolls    = {}   -- valor numérico de dado
 local RecentRollMeta = {}   -- metadatos (choice, isWin, roll, time)
@@ -381,11 +402,18 @@ addonTable.HandleChatSystem = HandleChatSystem
 local function CleanLootPlayerName(name)
     if not name or name == "" then return name end
     name = name:gsub("^%s+", ""):gsub("%s+$", "")
+    -- El cliente antepone el enlace del historial de loot ("|HlootHistory:1|h[Loot]|h: ")
+    -- a las líneas de botín; sin quitarlo el jugador capturado es el enlace completo.
+    name = name:gsub("^|H.-|h%[.-%]|h:%s*", "")
     name = name:gsub("^[Ll][Oo][Oo][Tt]%s*[:%-]%s*", "")
     name = name:gsub("^[Ll][Oo][Oo][Tt]%s+", "")
     name = name:gsub("^[Bb]otín%s*[:%-]%s*", "")
     name = name:gsub("^[Bb]otín%s+", "")
     name = name:gsub("^%s+", ""):gsub("%s+$", "")
+    -- El propio jugador aparece como "You"/"Tú" en la línea del historial de loot
+    if name == "You" or name == "Tú" or (_G.YOU and name == _G.YOU) then
+        name = UnitName("player") or name
+    end
     return name
 end
 
@@ -480,6 +508,12 @@ local function HandleChatLoot(event, msg, ...)
         return
     end
 
+    -- Algunas variantes del mensaje añaden la puntuación de la frase al enlace
+    -- capturado ("...|h|r."), lo que ensuciaba el nombre mostrado en el log.
+    if itemLink then
+        itemLink = itemLink:gsub("[%s%.,;:]+$", "")
+    end
+
     local id = tonumber(string.match(itemLink, "item:(%d+):"))
     if not id then return end
 
@@ -497,6 +531,14 @@ local function HandleChatLoot(event, msg, ...)
                 lootViaBonusRoll = true ; break
             end
         end
+    end
+
+    -- El cliente emite dos líneas de chat por cada botín; ignorar la repetida
+    local lootPlayer = playerName or UnitName("player")
+    if IsDuplicateLootMessage(id, lootPlayer, lootViaBonusRoll) then
+        LogDebug(string.format("%s Loot duplicado ignorado: id=%s jugador=%s bonus=%s",
+            FormatLogPrefix("Loot"), tostring(id), tostring(lootPlayer), tostring(lootViaBonusRoll)))
+        return
     end
 
     LogDebug(string.format("%s Loot detectado en chat: item=%s (id=%s) fuente=%s jugador=%s rastreado=%s bonus=%s",
